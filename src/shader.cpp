@@ -5,32 +5,17 @@
 
 #include "shader.h"
 
-std::string read_shader_file(const std::string &path) {
-  std::string content;
-  std::ifstream fs(path, std::ios::in);
-
-  if(!fs.is_open()) {
-    std::cerr << "Could not read file " << path << "." << std::endl;
-    return "";
-  }
-
-  for (std::string line; std::getline(fs, line); ) {
-    content.append(line + "\n");
-  }
-
-  return content;
-}
-
-GLuint link_shader_program(const std::string &vertex_path, const std::string &fragment_path) {
+Shader::Shader(const std::string &vertex_path, const std::string &fragment_path) {
   auto vertex_shader = compile_shader(vertex_path, GL_VERTEX_SHADER);
   auto fragment_shader = compile_shader(fragment_path, GL_FRAGMENT_SHADER);
   if (!vertex_shader or !fragment_shader) {
     if (vertex_shader) glDeleteShader(vertex_shader);
     if (fragment_shader) glDeleteShader(fragment_shader);
-    return 0;
+    ID = 0;
+    return;
   }
 
-  auto shader_program = glCreateProgram();
+  GLint shader_program = glCreateProgram();
   glAttachShader(shader_program, vertex_shader);
   glAttachShader(shader_program, fragment_shader);
   glBindFragDataLocation(shader_program, 0, "out_color");
@@ -57,10 +42,27 @@ GLuint link_shader_program(const std::string &vertex_path, const std::string &fr
   glDeleteShader(vertex_shader);
   glDeleteShader(fragment_shader);
 
-  return shader_program;
+  ID = shader_program;
 }
 
-GLuint compile_shader(const std::string &shader_file_path, GLenum shader_type) {
+std::string Shader::read_shader_file(const std::string &path) {
+  std::stringstream fs_content;
+  std::ifstream fs;
+  fs.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+
+  try {
+    fs.open(path, std::ios::in);
+    fs_content << fs.rdbuf();
+  }
+  catch (std::ifstream::failure& e) {
+    std::cerr << "Could not read file " << path << ": " << e.what() << std::endl;
+    return "";
+  }
+
+  return fs_content.str();
+}
+
+GLuint Shader::compile_shader(const std::string &shader_file_path, GLenum shader_type) {
   auto shader_source = read_shader_file(shader_file_path);
   auto shader_source_c = shader_source.c_str();
   auto shader = glCreateShader(shader_type);

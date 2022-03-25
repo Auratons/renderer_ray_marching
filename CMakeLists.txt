@@ -18,6 +18,7 @@ find_package(glfw3 3.3 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(X11 REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
+add_subdirectory("include/glm")
 #find_package(GLUT REQUIRED)
 
 add_library(GLAD "${CMAKE_SOURCE_DIR}/src/glad.c")
@@ -38,6 +39,7 @@ target_link_libraries(${PROJECT_NAME}
     PUBLIC
         GLAD
         HAPPLY
+        glm::glm
         CLI11::CLI11
         glfw
         OpenGL::GL
@@ -56,6 +58,7 @@ target_include_directories(${PROJECT_NAME}
     PUBLIC
         "${PROJECT_BINARY_DIR}"
         ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/include/happly
         #${OPENGL_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}
 )

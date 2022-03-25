@@ -48,7 +48,26 @@ RUN export DIR=/tmp/glfw3 \
  && rm -rf ${DIR} \
  && unset DIR
 
+RUN export DIR=/tmp/cli11 \
+ && git clone --depth 1 --branch v2.1.2 https://github.com/CLIUtils/CLI11.git ${DIR} \
+ && cmake -S "${DIR}" -B "${DIR}/build" \
+ && cmake --build "${DIR}/build" --target install --config Debug -j $(nproc) \
+ && rm -rf ${DIR} \
+ && unset DIR
+
 COPY ./docker-entrypoint.sh /
 ENTRYPOINT ["/docker-entrypoint.sh"]
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES graphics,utility,compute
+
+docker run --gpus all --rm -it \
+    -e DISPLAY=$DISPLAY \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v $(pwd):$(pwd) \
+    -w $(pwd) \
+    --cap-add sys_ptrace \
+    -v $HOME/.Xauthority:/root/.Xauthority \
+    --net=host \
+    --ipc=host \
+    -e QT_X11_NO_MITSHM=1 \
+    renderer:latest zsh
