@@ -7,69 +7,67 @@ else()
   message(STATUS "Building for CUDA ${CUDA_ARCH}")
 endif()
 
+include(cmake/glad.cmake)
+include(cmake/glm.cmake)
+include(cmake/kdtree.cmake)
+include(cmake/happly.cmake)
+
 # set c++/cuda standards for all targets
 # `target_compile_features({target} PUBLIC cxx_std_17 cuda_std_14)` does not work (https://gitlab.kitware.com/cmake/cmake/-/issues/21883)
 # by removing `set(CMAKE_CUDA_STANDARD XX)` nvcc compiles with -std=c++CXX_STANDARD no matter the `cuda_std_14`
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile_commands.json
 
 find_package(glfw3 3.3 REQUIRED)
 find_package(OpenGL REQUIRED)
-find_package(X11 REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
-add_subdirectory("include/glm")
-#find_package(GLUT REQUIRED)
 
-add_library(GLAD "${CMAKE_SOURCE_DIR}/src/glad.c")
-target_include_directories(GLAD
-    PUBLIC
-        ${CMAKE_SOURCE_DIR}/include
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile_commands.json
+
+add_executable(${PROJECT_NAME}
+  main.cpp
+  src/shader.cpp
+  src/utils.cu
 )
-
-add_library(HAPPLY INTERFACE)
-target_include_directories(HAPPLY
-    INTERFACE
-        ${CMAKE_SOURCE_DIR}/include/happly
-)
-
-add_executable(${PROJECT_NAME} src/shader.cpp main.cpp)
 
 target_link_libraries(${PROJECT_NAME}
-    PUBLIC
-        GLAD
-        HAPPLY
-        glm::glm
-        CLI11::CLI11
-        glfw
-        OpenGL::GL
-        dl
-        #GLUT::GLUT
-        X11
-        Xrandr
-        Xinerama
-        Xi
-        Xxf86vm
-        Xcursor
-        pthread
+  GLAD
+  HAPPLY
+  KDTREE
+  glm::glm
+  CLI11::CLI11
+  glfw
+  OpenGL::GL
+  dl
+#  GLUT::GLUT
+#  X11
+#  Xrandr
+#  Xinerama
+#  Xi
+#  Xxf86vm
+#  Xcursor
+#  pthread
+#  CUDA::toolkit
 )
 
 target_include_directories(${PROJECT_NAME}
-    PUBLIC
-        "${PROJECT_BINARY_DIR}"
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/include/happly
-        #${OPENGL_INCLUDE_DIRS}
-        ${CMAKE_SOURCE_DIR}
+  PUBLIC
+    ${CMAKE_SOURCE_DIR}/include
 )
 
 # https://cmake.org/cmake/help/latest/variable/CMAKE_LANG_COMPILER_ID.htmlq
 # https://cmake.org/cmake/help/latest/prop_sf/LANGUAGE.html
 # https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html
 target_compile_options(${PROJECT_NAME}
-    PRIVATE
-        $<$<AND:$<COMPILE_LANG_AND_ID:CXX,CUDA,GNU>,$<CONFIG:DEBUG>>:-Werror -Wall -Wextra -Wextra -Wunreachable-code -Wunused -Wunused-function -Wunused-label -Wunused-parameter -Wunused-value -Wunused-variable>
-        $<$<AND:$<COMPILE_LANG_AND_ID:CXX,CUDA,GNU>,$<CONFIG:RELEASE>>:-O2>
+  PRIVATE
+    $<$<AND:$<COMPILE_LANG_AND_ID:CXX,CUDA,GNU>,$<CONFIG:DEBUG>>:-Wall -Wextra -Wextra -Wunreachable-code -Wunused -Wunused-function -Wunused-label -Wunused-parameter -Wunused-value -Wunused-variable>
+    $<$<AND:$<COMPILE_LANG_AND_ID:CXX,CUDA,GNU>,$<CONFIG:RELEASE>>:-O2>
+    $<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe --display_error_number,--diag_suppress="611,997">
+)
+
+target_compile_definitions(${PROJECT_NAME}
+  PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 if(NOT EXISTS ${PROJECT_BINARY_DIR}/.gitignore)

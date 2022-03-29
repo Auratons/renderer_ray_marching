@@ -4,14 +4,11 @@
 #include <string>
 
 #include "CLI/App.hpp"
-#include "CLI/Formatter.hpp"
-#include "CLI/Config.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <glm/gtx/string_cast.hpp>
+#include <happly.h>
 
 #include "camera.h"
-#include "happly.h"
 #include "shader.h"
 #include "utils.h"
 
@@ -46,11 +43,7 @@ int main(int argc, char** argv) {
   happly::PLYData ply(pcd_path);
   auto vertices = ply.getVertexPositions();
   auto colors = ply.getVertexColors();
-
-  auto vbo_data = vector<Point>(colors.size());
-  for (size_t idx = 0; idx < vertices.size(); ++idx) {
-    vbo_data[idx] = Point(vertices[idx], colors[idx], 10.0f);
-  }
+  auto vbo_data = generate_vertex_buffer(vertices, colors);
 
   try {
     init_glfw();
@@ -60,7 +53,6 @@ int main(int argc, char** argv) {
       throw std::exception();
     }
     glfwMakeContextCurrent(window);
-
 
     if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
       std::cerr << "Failed to initialize GLAD." << std::endl;
@@ -100,14 +92,12 @@ int main(int argc, char** argv) {
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
 
-    Shader shader("shaders/vertex.vert", "shaders/fragment.frag");
+    Shader shader(CMAKE_SOURCE_DIR "/shaders/vertex.vert", CMAKE_SOURCE_DIR "/shaders/fragment.frag");
     if (!shader.good()) {
       cerr << "Shader failure, exiting." << endl;
       return -1;
     }
 
-    glm::mat4 projection;
-    glm::mat4 view;
     glm::mat4 model(1.0f);
 
     // render loop

@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:1.8.0-cuda11.1-cudnn8-devel
+FROM nvidia/cuda:11.1-devel-ubuntu20.04
 
 ARG CUDA_ARCH
 
@@ -11,13 +11,17 @@ RUN if [ -z "${CUDA_ARCH}" ]; \
     fi
 
 RUN export DEBIAN_FRONTEND=noninteractive \
+ && ln -fs /usr/share/zoneinfo/Europe/Prague /etc/localtime \
  && apt-get -yqq update \
  && apt-get install -yqq --no-install-recommends \
+        ssh \
         build-essential \
         gcc \
         g++ \
         gdb \
         clang \
+        rsync \
+        tar \
         python \
         wget \
         vim \
@@ -28,10 +32,28 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         libglvnd-dev \
         libgl1-mesa-dev \
         libegl1-mesa-dev \
+        libgl1-mesa-glx \
+        libsm6 \
+        libxext6 \
+        libxrender-dev \
+        libosmesa-dev \
+        libglew-dev \
+        libopenblas-dev \
         zsh 1> /dev/null \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
  && unset DEBIAN_FRONTEND
+
+RUN ( \
+    echo 'LogLevel DEBUG2'; \
+    echo 'PermitRootLogin yes'; \
+    echo 'PasswordAuthentication yes'; \
+    echo 'Subsystem sftp /usr/lib/openssh/sftp-server'; \
+  ) > /etc/ssh/sshd_config_test_clion \
+  && mkdir /run/sshd
+
+RUN useradd -m user \
+  && yes password | passwd user
 
 # Install newer CMake
 RUN wget https://cmake.org/files/v3.19/cmake-3.19.8-Linux-x86_64.sh -q -O /tmp/cmake-install.sh \
@@ -55,19 +77,33 @@ RUN export DIR=/tmp/cli11 \
  && rm -rf ${DIR} \
  && unset DIR
 
+#RUN export DIR=/tmp/thrust \
+# && git clone --depth 1 --branch cuda-11.1 --recurse-submodules https://github.com/NVIDIA/thrust.git ${DIR} \
+# && cmake -S "${DIR}" -B "${DIR}/build" -DTHRUST_ENABLE_TESTING=OFF -DTHRUST_ENABLE_EXAMPLES=OFF -DTHRUST_ENABLE_HEADER_TESTING=OFF -DCMAKE_CUDA_ARCHITECTURES=75 \
+# && cmake --build "${DIR}/build" --target install --config Debug -j $(nproc) \
+# && ln -s /usr/local/include/thrust/system/cuda/detail/cub /usr/local/include/cub \
+# && rm -rf ${DIR} \
+# && unset DIR
+
+RUN ( \
+    echo 'Port 2222'; \
+  ) >> /etc/ssh/sshd_config_test_clion
+
+RUN echo 'root:root_pass' | chpasswd
 COPY ./docker-entrypoint.sh /
 ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config_test_clion"]
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES graphics,utility,compute
 
-docker run --gpus all --rm -it \
-    -e DISPLAY=$DISPLAY \
-    -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -v $(pwd):$(pwd) \
-    -w $(pwd) \
-    --cap-add sys_ptrace \
-    -v $HOME/.Xauthority:/root/.Xauthority \
-    --net=host \
-    --ipc=host \
-    -e QT_X11_NO_MITSHM=1 \
-    renderer:latest zsh
+#docker run --gpus all --rm -it \
+#    -e DISPLAY=$DISPLAY \
+#    -v /tmp/.X11-unix:/tmp/.X11-unix \
+#    -v $(pwd):$(pwd) \
+#    -w $(pwd) \
+#    --cap-add sys_ptrace \
+#    -v $HOME/.Xauthority:/root/.Xauthority \
+#    --net=host \
+#    --ipc=host \
+#    -e QT_X11_NO_MITSHM=1 \
+#    renderer:latest zsh

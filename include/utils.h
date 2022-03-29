@@ -1,8 +1,8 @@
 #ifndef POINTCLOUD_RENDERER_UTILS_H
 #define POINTCLOUD_RENDERER_UTILS_H
 
-#include <vector>
 #include <array>
+#include <vector>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -25,5 +25,10 @@ struct Point {
     x(xyz[0]), y(xyz[1]), z(xyz[2]), r(color[0] / 255.0f), g(color[1] / 255.0f), b(color[2] / 255.0f), radius(radius) {
     }
 };
+
+std::vector<Point> generate_vertex_buffer(
+    std::vector<std::array<double, 3>> &vertices,
+    std::vector<std::array<unsigned char, 3>> &colors
+);
 
 #endif //POINTCLOUD_RENDERER_UTILS_H
