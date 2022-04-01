@@ -1,24 +1,38 @@
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <numeric>
 #include <string>
 #include <vector>
 
 #include "shader.h"
 
-Shader::Shader(const std::string &vertex_path, const std::string &fragment_path) {
-  auto vertex_shader = compile_shader(vertex_path, GL_VERTEX_SHADER);
-  auto fragment_shader = compile_shader(fragment_path, GL_FRAGMENT_SHADER);
-  if (!vertex_shader or !fragment_shader) {
-    if (vertex_shader) glDeleteShader(vertex_shader);
-    if (fragment_shader) glDeleteShader(fragment_shader);
+Shader::Shader(const std::vector<std::string> &paths, const std::vector<GLenum> &types) {
+  if (paths.size() != types.size())
+    throw std::runtime_error("Shaders paths and types do not have matching lengths.");
+  std::vector<GLuint> shaders;
+  std::transform(
+      paths.begin(), paths.end(),
+      types.begin(),
+      std::back_inserter(shaders),
+      [](const std::string &path, GLenum type){ return compile_shader(path, type); }
+  );
+  auto all_valid = std::accumulate(
+      shaders.begin(), shaders.end(),
+      true,
+      [](GLuint a, GLuint b){ return bool(a) && bool(b); }
+  );
+  if (!all_valid) {
+    for (auto &&shader : shaders) {
+      if (shader) glDeleteShader(shader);
+    }
     ID = 0;
     return;
   }
 
   GLint shader_program = glCreateProgram();
-  glAttachShader(shader_program, vertex_shader);
-  glAttachShader(shader_program, fragment_shader);
-  glBindFragDataLocation(shader_program, 0, "out_color");
+  for (auto &&shader : shaders)
+    glAttachShader(shader_program, shader);
   glLinkProgram(shader_program);
 
   auto status = GL_FALSE;
@@ -39,8 +53,8 @@ Shader::Shader(const std::string &vertex_path, const std::string &fragment_path)
     shader_program = 0;
   }
 
-  glDeleteShader(vertex_shader);
-  glDeleteShader(fragment_shader);
+  for (auto &&shader : shaders)
+    glDeleteShader(shader);
 
   ID = shader_program;
 }

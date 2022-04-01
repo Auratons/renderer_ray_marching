@@ -4,26 +4,26 @@
 #include <string>
 
 #include "CLI/App.hpp"
+#include "CLI/Formatter.hpp"
+#include "CLI/Config.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <happly.h>
 
 #include "camera.h"
+#include "pointcloud.h"
 #include "shader.h"
 #include "utils.h"
 
 #define SCREEN_WIDTH 1024.0
 #define SCREEN_HEIGHT 768.0
 
-// camera
-Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
 float lastX = SCREEN_WIDTH / 2.0f;
 float lastY = SCREEN_HEIGHT / 2.0f;
-bool firstMouse = true;
-
-// timing
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
+bool firstMouse = true;
+auto camera = Camera(glm::vec3(0.0f, 0.0f, 3.0f));
 
 using namespace std;
 
@@ -31,7 +31,7 @@ void init_glfw();
 void framebuffer_size_callback(GLFWwindow *, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
-void processInput(GLFWwindow *window);
+void process_input(GLFWwindow *window);
 
 
 int main(int argc, char** argv) {
@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
   happly::PLYData ply(pcd_path);
   auto vertices = ply.getVertexPositions();
   auto colors = ply.getVertexColors();
-  auto vbo_data = generate_vertex_buffer(vertices, colors);
+  auto radii = compute_radii(vertices, colors);
 
   try {
     init_glfw();
@@ -78,25 +78,15 @@ int main(int argc, char** argv) {
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Object definition
-    GLuint vao, vbo;
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, vbo_data, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void *) 0);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(6 * sizeof(float)));
-    glEnableVertexAttribArray(2);
-
-    Shader shader(CMAKE_SOURCE_DIR "/shaders/vertex.vert", CMAKE_SOURCE_DIR "/shaders/fragment.frag");
+    auto pcd = Pointcloud(vertices, colors, radii);
+    vector<string> paths{CMAKE_SOURCE_DIR "/shaders/vertex.vert", CMAKE_SOURCE_DIR "/shaders/fragment.frag"};
+    vector<GLenum> types{GL_VERTEX_SHADER, GL_FRAGMENT_SHADER};
+    auto shader = Shader(paths, types);
     if (!shader.good()) {
       cerr << "Shader failure, exiting." << endl;
       return -1;
     }
+    shader.use();
 
     glm::mat4 model(1.0f);
 
@@ -106,18 +96,16 @@ int main(int argc, char** argv) {
       deltaTime = currentFrame - lastFrame;
       lastFrame = currentFrame;
 
-      processInput(window);
+      process_input(window);
 
-      shader.use();
       shader.set_mat4("projective_", glm::perspective(glm::radians(camera.Zoom), (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, 100.0f));
       shader.set_mat4("model_", model);
       shader.set_mat4("view_", camera.GetViewMatrix());
 
+      pcd.bind();
       glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-      glBindVertexArray(vao);
-      glDrawArrays(GL_POINTS, 0, (GLsizei)vbo_data.size());
-      glBindVertexArray(0);
+      glDrawArrays(GL_POINTS, 0, (GLsizei)radii.size());
+      pcd.unbind();
 
       glfwSwapBuffers(window);
       glfwPollEvents();
@@ -145,8 +133,7 @@ void framebuffer_size_callback(GLFWwindow *, int width, int height) {
   glViewport(0, 0, width, height);
 }
 
-void processInput(GLFWwindow *window)
-{
+void process_input(GLFWwindow *window) {
   if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
     glfwSetWindowShouldClose(window, true);
 
@@ -160,8 +147,7 @@ void processInput(GLFWwindow *window)
     camera.ProcessKeyboard(RIGHT, deltaTime);
 }
 
-void mouse_callback(GLFWwindow*, double xposIn, double yposIn)
-{
+void mouse_callback(GLFWwindow*, double xposIn, double yposIn) {
   auto xpos = static_cast<float>(xposIn);
   auto ypos = static_cast<float>(yposIn);
 
@@ -181,7 +167,6 @@ void mouse_callback(GLFWwindow*, double xposIn, double yposIn)
   camera.ProcessMouseMovement(xoffset, yoffset);
 }
 
-void scroll_callback(GLFWwindow*, double, double yoffset)
-{
+void scroll_callback(GLFWwindow*, double, double yoffset) {
   camera.ProcessMouseScroll(static_cast<float>(yoffset));
 }

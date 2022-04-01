@@ -26,7 +26,7 @@ struct Point {
     }
 };
 
-std::vector<Point> generate_vertex_buffer(
+std::vector<float> compute_radii(
     std::vector<std::array<double, 3>> &vertices,
     std::vector<std::array<unsigned char, 3>> &colors
 );

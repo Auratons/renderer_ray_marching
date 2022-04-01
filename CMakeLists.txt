@@ -27,6 +27,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile
 add_executable(${PROJECT_NAME}
   main.cpp
   src/shader.cpp
+  src/pointcloud.cpp
   src/utils.cu
 )
 
@@ -48,11 +49,6 @@ target_link_libraries(${PROJECT_NAME}
 #  Xcursor
 #  pthread
 #  CUDA::toolkit
-)
-
-target_include_directories(${PROJECT_NAME}
-  PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
 )
 
 # https://cmake.org/cmake/help/latest/variable/CMAKE_LANG_COMPILER_ID.htmlq

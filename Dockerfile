@@ -49,11 +49,11 @@ RUN ( \
     echo 'PermitRootLogin yes'; \
     echo 'PasswordAuthentication yes'; \
     echo 'Subsystem sftp /usr/lib/openssh/sftp-server'; \
+    echo 'Port 2222'; \
   ) > /etc/ssh/sshd_config_test_clion \
   && mkdir /run/sshd
 
-RUN useradd -m user \
-  && yes password | passwd user
+RUN echo 'root:root_pass' | chpasswd
 
 # Install newer CMake
 RUN wget https://cmake.org/files/v3.19/cmake-3.19.8-Linux-x86_64.sh -q -O /tmp/cmake-install.sh \
@@ -77,24 +77,11 @@ RUN export DIR=/tmp/cli11 \
  && rm -rf ${DIR} \
  && unset DIR
 
-#RUN export DIR=/tmp/thrust \
-# && git clone --depth 1 --branch cuda-11.1 --recurse-submodules https://github.com/NVIDIA/thrust.git ${DIR} \
-# && cmake -S "${DIR}" -B "${DIR}/build" -DTHRUST_ENABLE_TESTING=OFF -DTHRUST_ENABLE_EXAMPLES=OFF -DTHRUST_ENABLE_HEADER_TESTING=OFF -DCMAKE_CUDA_ARCHITECTURES=75 \
-# && cmake --build "${DIR}/build" --target install --config Debug -j $(nproc) \
-# && ln -s /usr/local/include/thrust/system/cuda/detail/cub /usr/local/include/cub \
-# && rm -rf ${DIR} \
-# && unset DIR
+ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
 
-RUN ( \
-    echo 'Port 2222'; \
-  ) >> /etc/ssh/sshd_config_test_clion
-
-RUN echo 'root:root_pass' | chpasswd
 COPY ./docker-entrypoint.sh /
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config_test_clion"]
-ENV NVIDIA_VISIBLE_DEVICES all
-ENV NVIDIA_DRIVER_CAPABILITIES graphics,utility,compute
 
 #docker run --gpus all --rm -it \
 #    -e DISPLAY=$DISPLAY \
