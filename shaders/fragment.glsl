@@ -1,9 +1,11 @@
 #version 330 core
 
-in vec4 color;
+in vec2 tex;
 
-layout (location = 0) out vec4 frag_color;
+uniform sampler2D rendered_image;
+
+out vec4 frag_color;
 
 void main() {
-    frag_color = color;
+    frag_color = texture(rendered_image, tex);
 }

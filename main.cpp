@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <filesystem>
 #include <string>
 
 #include "CLI/App.hpp"
@@ -12,6 +13,7 @@
 
 #include "camera.h"
 #include "pointcloud.h"
+#include "quad.h"
 #include "shader.h"
 #include "utils.h"
 
@@ -27,7 +29,86 @@ auto camera = Camera(glm::vec3(0.0f, 0.0f, 3.0f));
 
 using namespace std;
 
-void init_glfw();
+const char* gluErrorString(GLenum);
+char last_error_buffer[20];
+
+const char* gluErrorString(GLenum x) {
+  switch(x) {
+    case GL_NO_ERROR: return "GL_NO_ERROR: No error has been recorded";
+    case GL_INVALID_ENUM: return "GL_INVALID_ENUM: An unacceptable value is specified for an enumerated argument. The offending command is ignored and has no other side effect than to set the error flag";
+    case GL_INVALID_VALUE: return "GL_INVALID_VALUE: A numeric argument is out of range. The offending command is ignored and has no other side effect than to set the error flag";
+    case GL_INVALID_OPERATION: return "GL_INVALID_OPERATION: The specified operation is not allowed in the current state. The offending command is ignored and has no other side effect than to set the error flag";
+#ifdef LEGACY_OPENGL
+      case GL_STACK_OVERFLOW: return "GL_STACK_OVERFLOW: An attempt has been made to perform an operation that would cause an internal stack to overflow";
+    case GL_STACK_UNDERFLOW: return "GL_STACK_UNDERFLOW: An attempt has been made to perform an operation that would cause an internal stack to underflow";
+#endif
+    case GL_OUT_OF_MEMORY: return "GL_OUT_OF_MEMORY: There is not enough memory left to execute the command. The state of the GL is undefined, except for the state of the error flags, after this error is recorded";
+    case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete. The offending command is ignored and has no other side effect than to set the error flag";
+#ifdef ARB_KHR_robustness
+      // https://www.opengl.org/wiki/OpenGL_Error
+    case GL_CONTEXT_LOST: return "GL_CONTEXT_LOST: Given if the OpenGL context has been lost, due to a graphics card reset";
+#endif
+    default: sprintf (last_error_buffer, "0x%X", x); return last_error_buffer;
+  }
+}
+
+
+//void CHECK_CUDA(cudaError_t err);
+//void CHECK_CUDA(cudaError_t err) {
+//  if(err != cudaSuccess) {
+//    std::cerr << "Error: " << cudaGetErrorString(err) << std::endl;
+//    exit(-1);
+//  }
+//}
+
+void CHECK_ERROR_GL();
+void CHECK_ERROR_GL() {
+  GLenum err = glGetError();
+  if(err != GL_NO_ERROR) {
+    std::cerr << "GL Error: " << gluErrorString(err) << std::endl;
+    exit(-1);
+  }
+}
+
+
+void printWorkGroupCount();
+void printWorkGroupCount() {
+  int work_grp_cnt[3];
+
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &work_grp_cnt[0]);
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &work_grp_cnt[1]);
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &work_grp_cnt[2]);
+
+  std::cout << "max global (total) work group size x: "  << work_grp_cnt[0]
+            << " y: " << work_grp_cnt[1]
+            << " z: " << work_grp_cnt[2] << std::endl << std::endl;
+}
+
+void printWorkGroupSize();
+void printWorkGroupSize() {
+  int work_grp_size[3];
+
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0, &work_grp_size[0]);
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 1, &work_grp_size[1]);
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 2, &work_grp_size[2]);
+
+  std::cout << "max local (in order) work group sizes x: "  << work_grp_size[0]
+            << " y: " << work_grp_size[1]
+            << " z: " << work_grp_size[2] << std::endl << std::endl;
+}
+
+int printInvocations();
+int printInvocations() {
+  int work_grp_inv;
+  glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &work_grp_inv);
+
+  std::cout << "max local work group invocations " << work_grp_inv << std::endl << std::endl;
+
+  return work_grp_inv;
+}
+
+GLFWwindow* init_glfw();
+void init_glad();
 void framebuffer_size_callback(GLFWwindow *, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
@@ -43,52 +124,53 @@ int main(int argc, char** argv) {
   happly::PLYData ply(pcd_path);
   auto vertices = ply.getVertexPositions();
   auto colors = ply.getVertexColors();
-  auto radii = compute_radii(vertices, colors);
+  vertices.resize(1000);
+  colors.resize(1000);
+  auto radii = compute_radii(vertices);
 
   try {
-    init_glfw();
-    auto window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Pointcloud Renderer", nullptr, nullptr);
-    if (!window) {
-      std::cerr << "Fatal error: Failed to create GLFW window." << std::endl;
-      throw std::exception();
-    }
-    glfwMakeContextCurrent(window);
-
-    if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
-      std::cerr << "Failed to initialize GLAD." << std::endl;
-      throw std::exception();
-    }
+    auto window = init_glfw();
+    init_glad();
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetScrollCallback(window, scroll_callback);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-    // Global OpenGL state
     glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-
-    glEnable(GL_PROGRAM_POINT_SIZE);
-    glEnable(GL_MULTISAMPLE);
-    glEnable(GL_DEPTH_TEST);
-
-    glDepthMask(GL_TRUE);
-    glDepthFunc(GL_LESS);
-    glDepthRange(0.0, 1.0);
-
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT);
 
-    auto pcd = Pointcloud(vertices, colors, radii);
-    vector<string> paths{CMAKE_SOURCE_DIR "/shaders/vertex.vert", CMAKE_SOURCE_DIR "/shaders/fragment.frag"};
-    vector<GLenum> types{GL_VERTEX_SHADER, GL_FRAGMENT_SHADER};
-    auto shader = Shader(paths, types);
-    if (!shader.good()) {
+    auto shader_path_vertex = filesystem::current_path() / "shaders/vertex.glsl";
+    auto shader_path_fragment = filesystem::current_path() / "shaders/fragment.glsl";
+    auto shader_path_compute = filesystem::current_path() / "shaders/compute.glsl";
+    auto graphical_shader = Shader({shader_path_vertex, shader_path_fragment}, {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER});
+    auto compute_shader = Shader({shader_path_compute}, {GL_COMPUTE_SHADER});
+    if (!graphical_shader.good() || !compute_shader.good()) {
       cerr << "Shader failure, exiting." << endl;
       return -1;
     }
-    shader.use();
+    auto quad = Quad();
+    auto pcd = Pointcloud(vertices, colors, radii);
+    pcd.bind(1);
+    unsigned int invocations = printInvocations();  // 2**n
+    unsigned int workgroups_size = sqrt(invocations);
+
+    GLuint texOutput;
+    glGenTextures(1, &texOutput);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texOutput);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGBA, GL_FLOAT, nullptr);
+    glBindImageTexture(0, texOutput, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
     glm::mat4 model(1.0f);
+
+    double lastTime      = 0.0;
+    unsigned int counter = 0;
 
     // render loop
     while (!glfwWindowShouldClose(window)) {
@@ -98,14 +180,30 @@ int main(int argc, char** argv) {
 
       process_input(window);
 
-      shader.set_mat4("projective_", glm::perspective(glm::radians(camera.Zoom), (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, 100.0f));
-      shader.set_mat4("model_", model);
-      shader.set_mat4("view_", camera.GetViewMatrix());
+      compute_shader.use();
+      compute_shader.set_mat4("model", model);
+      compute_shader.set_mat4("view", camera.GetViewMatrix());
+      compute_shader.set_float("fov_radians", glm::radians(camera.Zoom));
 
-      pcd.bind();
-      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-      glDrawArrays(GL_POINTS, 0, (GLsizei)radii.size());
-      pcd.unbind();
+      glDispatchCompute(ceil(SCREEN_WIDTH / workgroups_size), ceil(SCREEN_HEIGHT / workgroups_size), 1);
+      glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+      graphical_shader.use();
+      quad.bind();
+      glClear(GL_COLOR_BUFFER_BIT);
+      glActiveTexture(GL_TEXTURE0);
+      glBindTexture(GL_TEXTURE_2D, texOutput);
+      glDrawArrays(GL_TRIANGLES, 0, 6);
+      quad.unbind();
+
+      ++counter;
+      auto currentTime = glfwGetTime();
+
+      if (currentTime - lastTime >= 1.0) {
+        cout << counter << " FPS" << endl;
+        ++lastTime;
+        counter = 0;
+      }
 
       glfwSwapBuffers(window);
       glfwPollEvents();
@@ -119,14 +217,28 @@ int main(int argc, char** argv) {
   return EXIT_SUCCESS;
 }
 
-void init_glfw() {
+GLFWwindow* init_glfw() {
   glfwInit();
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 #ifdef __APPLE__
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
+  auto window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Pointcloud Renderer", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "Fatal error: Failed to create GLFW window." << std::endl;
+    throw std::exception();
+  }
+  glfwMakeContextCurrent(window);
+  return window;
+}
+
+void init_glad() {
+  if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
+    std::cerr << "Failed to initialize GLAD." << std::endl;
+    throw std::exception();
+  }
 }
 
 void framebuffer_size_callback(GLFWwindow *, int width, int height) {

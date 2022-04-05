@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.1-devel-ubuntu20.04
+FROM nvidia/cudagl:11.4.2-devel-ubuntu20.04
 
 ARG CUDA_ARCH
 
@@ -30,16 +30,13 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         liblapack-dev \
         xorg-dev \
         libglvnd-dev \
-        libgl1-mesa-dev \
-        libegl1-mesa-dev \
-        libgl1-mesa-glx \
         libsm6 \
         libxext6 \
         libxrender-dev \
-        libosmesa-dev \
         libglew-dev \
         libopenblas-dev \
-        zsh 1> /dev/null \
+        zsh \
+        tmux 1> /dev/null \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
  && unset DEBIAN_FRONTEND

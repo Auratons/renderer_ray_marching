@@ -27,6 +27,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile
 add_executable(${PROJECT_NAME}
   main.cpp
   src/shader.cpp
+  src/quad.cpp
   src/pointcloud.cpp
   src/utils.cu
 )
@@ -61,10 +62,9 @@ target_compile_options(${PROJECT_NAME}
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe --display_error_number,--diag_suppress="611,997">
 )
 
-target_compile_definitions(${PROJECT_NAME}
-  PRIVATE
-    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
+configure_file(shaders/vertex.glsl shaders/vertex.glsl COPYONLY)
+configure_file(shaders/fragment.glsl shaders/fragment.glsl COPYONLY)
+configure_file(shaders/compute.glsl shaders/compute.glsl COPYONLY)
 
 if(NOT EXISTS ${PROJECT_BINARY_DIR}/.gitignore)
   file(WRITE ${PROJECT_BINARY_DIR}/.gitignore "*")

@@ -14,8 +14,8 @@
 class Pointcloud
 {
 private:
-    GLuint vao = 0;
-    GLuint vbo = 0;
+    GLuint ssbo = 0;
+    GLuint index = 0;
 
 public:
     Pointcloud(
@@ -23,18 +23,22 @@ public:
         const std::vector<std::array<unsigned char, 3>> &colors,
         const std::vector<float> &radii);
 
-    ~Pointcloud();
+    ~Pointcloud() {
+      glDeleteBuffers(1, &ssbo);
+    }
 
     [[nodiscard]] auto get_id() const noexcept {
-      return vao;
+      return ssbo;
     }
 
-    void bind() const noexcept {
-      glBindVertexArray(vao);
+    void bind(GLuint idx) noexcept {
+      index = idx;
+      glBindBufferBase(GL_SHADER_STORAGE_BUFFER, index, ssbo);
     }
 
-    void unbind() const noexcept {
-      glBindVertexArray(0);
+    void unbind() noexcept {
+      glBindBufferBase(GL_SHADER_STORAGE_BUFFER, index, 0);
+      index = 0;
     }
 };
 

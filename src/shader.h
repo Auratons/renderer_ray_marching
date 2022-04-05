@@ -48,6 +48,13 @@ public:
       set_int(name.c_str(), value);
     }
 
+    void set_uint(const char *name, unsigned int *value) const noexcept {
+      glUniform1uiv(glGetUniformLocation(ID, name), 1, value);
+    }
+    void set_int(const std::string &name, unsigned int *value) const noexcept {
+      set_uint(name.c_str(), value);
+    }
+
     void set_float(const char *name, float value) const noexcept {
       glUniform1f(glGetUniformLocation(ID, name), value);
     }
