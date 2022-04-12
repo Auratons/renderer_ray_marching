@@ -9,6 +9,7 @@
 #include "CLI/Config.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <glm/gtx/string_cast.hpp>
 #include <happly.h>
 
 #include "camera.h"
@@ -25,7 +26,7 @@ float lastY = SCREEN_HEIGHT / 2.0f;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 bool firstMouse = true;
-auto camera = Camera(glm::vec3(0.0f, 0.0f, 3.0f));
+auto camera = Camera();
 
 using namespace std;
 
@@ -122,8 +123,30 @@ int main(int argc, char** argv) {
   CLI11_PARSE(args, argc, argv);
 
   happly::PLYData ply(pcd_path);
-  auto vertices = ply.getVertexPositions();
-  auto colors = ply.getVertexColors();
+  auto input_vertices = ply.getVertexPositions();
+  auto input_colors = ply.getVertexColors();
+  auto all_vertices = vector<glm::vec3>(input_vertices.size());
+  auto all_colors = vector<glm::vec3>(input_colors.size());
+  transform(
+    input_vertices.begin(), input_vertices.end(), all_vertices.begin(),
+    [] (const std::array<double, 3> &pt){ return glm::vec3(pt[0], pt[1], pt[2]); }
+  );
+  transform(
+    input_colors.begin(), input_colors.end(), all_colors.begin(),
+    [] (const std::array<unsigned char, 3> &pt){ return glm::vec3(pt[0], pt[1], pt[2]) / 255.0f; }
+  );
+
+  auto indicators = filter_view_frustrum(camera.GetViewMatrix(), all_vertices, SCREEN_WIDTH / SCREEN_HEIGHT, glm::radians(camera.Zoom));
+
+  size_t cnt = count(indicators.begin(), indicators.end(), true);
+  auto vertices = decltype(all_vertices)(); vertices.reserve(cnt);
+  auto colors = decltype(all_colors)(); colors.reserve(cnt);
+  for (size_t i = 0; i < indicators.size(); ++i) {
+    if (indicators[i]) {
+      vertices.push_back(all_vertices.at(i));
+      colors.push_back(all_colors.at(i));
+    }
+  }
   vertices.resize(1000);
   colors.resize(1000);
   auto radii = compute_radii(vertices);

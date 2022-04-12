@@ -19,8 +19,8 @@ private:
 
 public:
     Pointcloud(
-        const std::vector<std::array<double, 3>> &points,
-        const std::vector<std::array<unsigned char, 3>> &colors,
+        const std::vector<glm::vec3> &points,
+        const std::vector<glm::vec3> &colors,
         const std::vector<float> &radii);
 
     ~Pointcloud() {
