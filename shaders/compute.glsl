@@ -27,8 +27,8 @@ uniform mat4 model;
 uniform mat4 view;
 uniform float fov_radians;
 
-RayHit sdf(vec3 pos);
-vec3 ray_march(vec3 rayOrigin, vec3 rayDir);
+RayHit sdf(vec4 pos);
+int ray_march(vec4 rayOrigin, vec4 rayDir);
 
 RayHit sdf(vec4 pos)
 {

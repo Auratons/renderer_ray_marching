@@ -40,6 +40,8 @@ public:
       glBindBufferBase(GL_SHADER_STORAGE_BUFFER, index, 0);
       index = 0;
     }
+
+    static std::tuple<std::vector<glm::vec3>, std::vector<glm::vec3>> load_ply(const std::string &path);
 };
 
 

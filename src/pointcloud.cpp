@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <glad/glad.h>
+#include <happly.h>
 
 #include "pointcloud.h"
 #include "utils.h"
@@ -37,4 +38,21 @@ Pointcloud::Pointcloud(
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
   glBufferData(GL_SHADER_STORAGE_BUFFER, vbo_data, GL_STATIC_DRAW);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+}
+
+std::tuple<std::vector<glm::vec3>, std::vector<glm::vec3>> Pointcloud::load_ply(const std::string &pcd_path) {
+  happly::PLYData ply(pcd_path);
+  auto input_vertices = ply.getVertexPositions();
+  auto input_colors = ply.getVertexColors();
+  auto all_vertices = std::vector<glm::vec3>(input_vertices.size());
+  auto all_colors = std::vector<glm::vec3>(input_colors.size());
+  transform(
+          input_vertices.begin(), input_vertices.end(), all_vertices.begin(),
+          [] (const std::array<double, 3> &pt){ return glm::vec3(pt[0], pt[1], pt[2]); }
+  );
+  transform(
+          input_colors.begin(), input_colors.end(), all_colors.begin(),
+          [] (const std::array<unsigned char, 3> &pt){ return glm::vec3(pt[0], pt[1], pt[2]) / 255.0f; }
+  );
+  return std::make_tuple(all_vertices, all_colors);
 }

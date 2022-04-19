@@ -19,17 +19,19 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
 find_package(glfw3 3.3 REQUIRED)
+find_package(CUDAToolkit REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile_commands.json
 
 add_executable(${PROJECT_NAME}
-  main.cpp
+  main.cu
   src/shader.cpp
   src/quad.cpp
   src/pointcloud.cpp
   src/utils.cu
+  src/ray_marching.cu
 )
 
 target_link_libraries(${PROJECT_NAME}

@@ -9,12 +9,14 @@
 #include "CLI/Config.hpp"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <glm/gtx/string_cast.hpp>
-#include <happly.h>
+#include <cuda_runtime.h>
+#include <cuda_gl_interop.h>
+#include <thrust/device_vector.h>
 
 #include "camera.h"
 #include "pointcloud.h"
 #include "quad.h"
+#include "ray_marching.h"
 #include "shader.h"
 #include "utils.h"
 
@@ -122,19 +124,7 @@ int main(int argc, char** argv) {
   args.add_option("-f,--file", pcd_path, "A help string");
   CLI11_PARSE(args, argc, argv);
 
-  happly::PLYData ply(pcd_path);
-  auto input_vertices = ply.getVertexPositions();
-  auto input_colors = ply.getVertexColors();
-  auto all_vertices = vector<glm::vec3>(input_vertices.size());
-  auto all_colors = vector<glm::vec3>(input_colors.size());
-  transform(
-    input_vertices.begin(), input_vertices.end(), all_vertices.begin(),
-    [] (const std::array<double, 3> &pt){ return glm::vec3(pt[0], pt[1], pt[2]); }
-  );
-  transform(
-    input_colors.begin(), input_colors.end(), all_colors.begin(),
-    [] (const std::array<unsigned char, 3> &pt){ return glm::vec3(pt[0], pt[1], pt[2]) / 255.0f; }
-  );
+  auto [all_vertices, all_colors] = Pointcloud::load_ply(pcd_path);
 
   auto indicators = filter_view_frustrum(camera.GetViewMatrix(), all_vertices, SCREEN_WIDTH / SCREEN_HEIGHT, glm::radians(camera.Zoom));
 
@@ -150,6 +140,9 @@ int main(int argc, char** argv) {
   vertices.resize(1000);
   colors.resize(1000);
   auto radii = compute_radii(vertices);
+  auto vertices_d = thrust::device_vector<glm::vec3>(vertices.begin(), vertices.end());
+  auto colors_d = thrust::device_vector<glm::vec3>(colors.begin(), colors.end());
+  auto radii_d = thrust::device_vector<float>(radii.begin(), radii.end());
 
   try {
     auto window = init_glfw();
@@ -166,18 +159,12 @@ int main(int argc, char** argv) {
 
     auto shader_path_vertex = filesystem::current_path() / "shaders/vertex.glsl";
     auto shader_path_fragment = filesystem::current_path() / "shaders/fragment.glsl";
-    auto shader_path_compute = filesystem::current_path() / "shaders/compute.glsl";
     auto graphical_shader = Shader({shader_path_vertex, shader_path_fragment}, {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER});
-    auto compute_shader = Shader({shader_path_compute}, {GL_COMPUTE_SHADER});
-    if (!graphical_shader.good() || !compute_shader.good()) {
+    if (!graphical_shader.good()) {
       cerr << "Shader failure, exiting." << endl;
       return -1;
     }
     auto quad = Quad();
-    auto pcd = Pointcloud(vertices, colors, radii);
-    pcd.bind(1);
-    unsigned int invocations = printInvocations();  // 2**n
-    unsigned int workgroups_size = sqrt(invocations);
 
     GLuint texOutput;
     glGenTextures(1, &texOutput);
@@ -195,21 +182,28 @@ int main(int argc, char** argv) {
     double lastTime      = 0.0;
     unsigned int counter = 0;
 
+    cudaGraphicsResource_t cuda_image_resource_handle;
+    cudaArray_t            cuda_image;
+
     // render loop
     while (!glfwWindowShouldClose(window)) {
       auto currentFrame = static_cast<float>(glfwGetTime());
       deltaTime = currentFrame - lastFrame;
       lastFrame = currentFrame;
 
+      cudaGraphicsGLRegisterImage(&cuda_image_resource_handle, texOutput, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsSurfaceLoadStore);
+      cudaCheckError();
+      cudaGraphicsMapResources(1, &cuda_image_resource_handle);
+      cudaCheckError();
+      cudaGraphicsSubResourceGetMappedArray(&cuda_image, cuda_image_resource_handle, 0, 0);
+      cudaCheckError();
+      launch_kernel(cuda_image, vertices_d.size(), reinterpret_cast<const float3 *>(vertices_d.data().get()), reinterpret_cast<const float3 *>(colors_d.data().get()), radii_d.data().get());
+      cudaGraphicsUnmapResources(1, &cuda_image_resource_handle);
+      cudaCheckError();
+      cudaGraphicsUnregisterResource(cuda_image_resource_handle);
+      cudaCheckError();
+
       process_input(window);
-
-      compute_shader.use();
-      compute_shader.set_mat4("model", model);
-      compute_shader.set_mat4("view", camera.GetViewMatrix());
-      compute_shader.set_float("fov_radians", glm::radians(camera.Zoom));
-
-      glDispatchCompute(ceil(SCREEN_WIDTH / workgroups_size), ceil(SCREEN_HEIGHT / workgroups_size), 1);
-      glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
       graphical_shader.use();
       quad.bind();
