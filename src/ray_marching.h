@@ -13,6 +13,32 @@
   } \
 }
 
-void launch_kernel(cudaArray_t cuda_image_array, size_t num_v, const float3 *vertices, const float3 *colors, const float *radii);
+class PointcloudRayMarcher {
+private:
+    static PointcloudRayMarcher *instance;
+
+protected:
+  PointcloudRayMarcher(
+    const float3 *vertices,
+    const float3 *colors,
+    const float *radii,
+    size_t pointcloud_size
+  );
+
+public:
+  PointcloudRayMarcher(PointcloudRayMarcher &other) = delete;
+  void operator=(const PointcloudRayMarcher &) = delete;
+
+  static PointcloudRayMarcher *get_instance(
+    const float3 *vertices,
+    const float3 *colors,
+    const float *radii,
+    size_t pointcloud_size,
+    GLuint texture_handle);
+
+    static PointcloudRayMarcher *get_instance();
+
+  void render_to_texture(const glm::mat4 &model, const glm::mat4 &view, float fov_radians);
+};
 
 #endif //POINTCLOUD_RENDERER_RAY_MARCHING_H

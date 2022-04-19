@@ -182,8 +182,13 @@ int main(int argc, char** argv) {
     double lastTime      = 0.0;
     unsigned int counter = 0;
 
-    cudaGraphicsResource_t cuda_image_resource_handle;
-    cudaArray_t            cuda_image;
+    auto renderer = PointcloudRayMarcher::get_instance(
+      reinterpret_cast<const float3 *>(vertices_d.data().get()),
+      reinterpret_cast<const float3 *>(colors_d.data().get()),
+      radii_d.data().get(),
+      vertices_d.size(),
+      texOutput
+    );
 
     // render loop
     while (!glfwWindowShouldClose(window)) {
@@ -191,19 +196,9 @@ int main(int argc, char** argv) {
       deltaTime = currentFrame - lastFrame;
       lastFrame = currentFrame;
 
-      cudaGraphicsGLRegisterImage(&cuda_image_resource_handle, texOutput, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsSurfaceLoadStore);
-      cudaCheckError();
-      cudaGraphicsMapResources(1, &cuda_image_resource_handle);
-      cudaCheckError();
-      cudaGraphicsSubResourceGetMappedArray(&cuda_image, cuda_image_resource_handle, 0, 0);
-      cudaCheckError();
-      launch_kernel(cuda_image, vertices_d.size(), reinterpret_cast<const float3 *>(vertices_d.data().get()), reinterpret_cast<const float3 *>(colors_d.data().get()), radii_d.data().get());
-      cudaGraphicsUnmapResources(1, &cuda_image_resource_handle);
-      cudaCheckError();
-      cudaGraphicsUnregisterResource(cuda_image_resource_handle);
-      cudaCheckError();
-
       process_input(window);
+
+      renderer->render_to_texture(model, camera.GetViewMatrix(), glm::radians(camera.Zoom));
 
       graphical_shader.use();
       quad.bind();
