@@ -5,40 +5,36 @@
 #include <glm/glm.hpp>
 #include <thrust/device_vector.h>
 
-#define cudaCheckError() { \
-  cudaError_t err = cudaGetLastError(); \
-  if(err != cudaSuccess) { \
-    std::cerr << "CUDA ERROR: " __FILE__ << " " << __LINE__ << " " << cudaGetErrorString(err) << std::endl; \
-    exit(1); \
-  } \
-}
-
 class PointcloudRayMarcher {
 private:
     static PointcloudRayMarcher *instance;
+    const thrust::device_vector<glm::vec4> vertices;
+    const thrust::device_vector<glm::vec4> colors;
+    const thrust::device_vector<float> radii;
+    thrust::device_vector<glm::vec4> frustrum_edge_pts_world_tmp = thrust::device_vector<glm::vec4>(4);
+    thrust::device_vector<size_t> frustrum_vertices_idx;
+    size_t frustrum_pcd_size = 0;
 
 protected:
   PointcloudRayMarcher(
-    const float3 *vertices,
-    const float3 *colors,
-    const float *radii,
-    size_t pointcloud_size
+    const thrust::device_vector<glm::vec4> &vertices,
+    const thrust::device_vector<glm::vec4> &colors,
+    const thrust::device_vector<float> &radii
   );
 
 public:
-  PointcloudRayMarcher(PointcloudRayMarcher &other) = delete;
+  PointcloudRayMarcher(PointcloudRayMarcher &) = delete;
   void operator=(const PointcloudRayMarcher &) = delete;
 
   static PointcloudRayMarcher *get_instance(
-    const float3 *vertices,
-    const float3 *colors,
-    const float *radii,
-    size_t pointcloud_size,
+    const thrust::device_vector<glm::vec4> &vertices,
+    const thrust::device_vector<glm::vec4> &colors,
+    const thrust::device_vector<float> &radii,
     GLuint texture_handle);
 
-    static PointcloudRayMarcher *get_instance();
+  static PointcloudRayMarcher *get_instance();
 
-  void render_to_texture(const glm::mat4 &model, const glm::mat4 &view, float fov_radians);
+  void render_to_texture(const glm::mat4 &view, float fov_radians);
 };
 
 #endif //POINTCLOUD_RENDERER_RAY_MARCHING_H

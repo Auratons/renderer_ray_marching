@@ -49,11 +49,11 @@ std::vector<bool> filter_view_frustrum(const glm::mat4 &view, const std::vector<
   return std::vector<bool>{is_in_frustrum.begin(), is_in_frustrum.end()};
 }
 
-std::vector<float> compute_radii(const std::vector<glm::vec3> &vertices) {
+std::vector<float> compute_radii(const std::vector<glm::vec4> &vertices) {
   const auto stride = 4;
-  auto points = thrust::device_vector<float>(vertices.size() * stride, 1.0f);  // Homogeneous one.
+  auto points = thrust::device_vector<float>(vertices.size() * stride);  // Homogeneous one.
   for (size_t idx = 0; idx < vertices.size(); ++idx)
-    thrust::copy((float*)&vertices[idx], (float*)&vertices[idx] + 3, &points[idx * stride]);
+    thrust::copy((float*)&vertices[idx], (float*)&vertices[idx] + 4, &points[idx * stride]);
   auto query = thrust::device_vector<float>(points.begin(), points.end());
 
   thrust::device_vector<int> indices;
@@ -66,7 +66,7 @@ std::vector<float> compute_radii(const std::vector<glm::vec3> &vertices) {
 //  thrust::copy(distances.begin(), distances.end(), ostream_iterator<float>(cout, "\n"));
   auto radii = std::vector<float>(vertices.size());
   for (size_t i = 1; i < indices.size(); i+=2) {
-    radii[indices[i]] = distances[i] / 2;
+    radii[indices[i]] = std::clamp(distances[i] / 2, 0.0f, 5.0f);
   }
   return radii;
 }

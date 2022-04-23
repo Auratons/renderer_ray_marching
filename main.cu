@@ -14,14 +14,12 @@
 #include <thrust/device_vector.h>
 
 #include "camera.h"
+#include "common.h"
 #include "pointcloud.h"
 #include "quad.h"
 #include "ray_marching.h"
 #include "shader.h"
 #include "utils.h"
-
-#define SCREEN_WIDTH 1024.0
-#define SCREEN_HEIGHT 768.0
 
 float lastX = SCREEN_WIDTH / 2.0f;
 float lastY = SCREEN_HEIGHT / 2.0f;
@@ -124,24 +122,12 @@ int main(int argc, char** argv) {
   args.add_option("-f,--file", pcd_path, "A help string");
   CLI11_PARSE(args, argc, argv);
 
-  auto [all_vertices, all_colors] = Pointcloud::load_ply(pcd_path);
-
-  auto indicators = filter_view_frustrum(camera.GetViewMatrix(), all_vertices, SCREEN_WIDTH / SCREEN_HEIGHT, glm::radians(camera.Zoom));
-
-  size_t cnt = count(indicators.begin(), indicators.end(), true);
-  auto vertices = decltype(all_vertices)(); vertices.reserve(cnt);
-  auto colors = decltype(all_colors)(); colors.reserve(cnt);
-  for (size_t i = 0; i < indicators.size(); ++i) {
-    if (indicators[i]) {
-      vertices.push_back(all_vertices.at(i));
-      colors.push_back(all_colors.at(i));
-    }
-  }
-  vertices.resize(1000);
-  colors.resize(1000);
+  auto [vertices, colors] = Pointcloud::load_ply(pcd_path);
+  vertices.resize(10000);
+  colors.resize(10000);
   auto radii = compute_radii(vertices);
-  auto vertices_d = thrust::device_vector<glm::vec3>(vertices.begin(), vertices.end());
-  auto colors_d = thrust::device_vector<glm::vec3>(colors.begin(), colors.end());
+  auto vertices_d = thrust::device_vector<glm::vec4>(vertices.begin(), vertices.end());
+  auto colors_d = thrust::device_vector<glm::vec4>(colors.begin(), colors.end());
   auto radii_d = thrust::device_vector<float>(radii.begin(), radii.end());
 
   try {
@@ -177,16 +163,13 @@ int main(int argc, char** argv) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGBA, GL_FLOAT, nullptr);
     glBindImageTexture(0, texOutput, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
-    glm::mat4 model(1.0f);
-
     double lastTime      = 0.0;
     unsigned int counter = 0;
 
     auto renderer = PointcloudRayMarcher::get_instance(
-      reinterpret_cast<const float3 *>(vertices_d.data().get()),
-      reinterpret_cast<const float3 *>(colors_d.data().get()),
-      radii_d.data().get(),
-      vertices_d.size(),
+      vertices_d,
+      colors_d,
+      radii_d,
       texOutput
     );
 
@@ -198,7 +181,7 @@ int main(int argc, char** argv) {
 
       process_input(window);
 
-      renderer->render_to_texture(model, camera.GetViewMatrix(), glm::radians(camera.Zoom));
+      renderer->render_to_texture(camera.GetViewMatrix(), glm::radians(camera.Zoom));
 
       graphical_shader.use();
       quad.bind();
@@ -265,9 +248,9 @@ void process_input(GLFWwindow *window) {
     camera.ProcessKeyboard(FORWARD, deltaTime);
   if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
     camera.ProcessKeyboard(BACKWARD, deltaTime);
-  if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-    camera.ProcessKeyboard(LEFT, deltaTime);
   if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+    camera.ProcessKeyboard(LEFT, deltaTime);
+  if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
     camera.ProcessKeyboard(RIGHT, deltaTime);
 }
 

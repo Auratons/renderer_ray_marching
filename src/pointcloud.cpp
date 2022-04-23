@@ -40,19 +40,19 @@ Pointcloud::Pointcloud(
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
-std::tuple<std::vector<glm::vec3>, std::vector<glm::vec3>> Pointcloud::load_ply(const std::string &pcd_path) {
+std::tuple<std::vector<glm::vec4>, std::vector<glm::vec4>> Pointcloud::load_ply(const std::string &pcd_path) {
   happly::PLYData ply(pcd_path);
   auto input_vertices = ply.getVertexPositions();
   auto input_colors = ply.getVertexColors();
-  auto all_vertices = std::vector<glm::vec3>(input_vertices.size());
-  auto all_colors = std::vector<glm::vec3>(input_colors.size());
+  auto all_vertices = std::vector<glm::vec4>(input_vertices.size());
+  auto all_colors = std::vector<glm::vec4>(input_colors.size());
   transform(
           input_vertices.begin(), input_vertices.end(), all_vertices.begin(),
-          [] (const std::array<double, 3> &pt){ return glm::vec3(pt[0], pt[1], pt[2]); }
+          [] (const std::array<double, 3> &pt){ return glm::vec4(pt[0], pt[1], pt[2], 1.0f); }
   );
   transform(
           input_colors.begin(), input_colors.end(), all_colors.begin(),
-          [] (const std::array<unsigned char, 3> &pt){ return glm::vec3(pt[0], pt[1], pt[2]) / 255.0f; }
+          [] (const std::array<unsigned char, 3> &pt){ return glm::vec4(pt[0] / 255.0f, pt[1] / 255.0f, pt[2] / 255.0f, 1.0f); }
   );
   return std::make_tuple(all_vertices, all_colors);
 }
