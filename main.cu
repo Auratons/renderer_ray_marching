@@ -10,7 +10,6 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
 #include <thrust/device_vector.h>
 
 #include "camera.h"
@@ -30,84 +29,6 @@ auto camera = Camera();
 
 using namespace std;
 
-const char* gluErrorString(GLenum);
-char last_error_buffer[20];
-
-const char* gluErrorString(GLenum x) {
-  switch(x) {
-    case GL_NO_ERROR: return "GL_NO_ERROR: No error has been recorded";
-    case GL_INVALID_ENUM: return "GL_INVALID_ENUM: An unacceptable value is specified for an enumerated argument. The offending command is ignored and has no other side effect than to set the error flag";
-    case GL_INVALID_VALUE: return "GL_INVALID_VALUE: A numeric argument is out of range. The offending command is ignored and has no other side effect than to set the error flag";
-    case GL_INVALID_OPERATION: return "GL_INVALID_OPERATION: The specified operation is not allowed in the current state. The offending command is ignored and has no other side effect than to set the error flag";
-#ifdef LEGACY_OPENGL
-      case GL_STACK_OVERFLOW: return "GL_STACK_OVERFLOW: An attempt has been made to perform an operation that would cause an internal stack to overflow";
-    case GL_STACK_UNDERFLOW: return "GL_STACK_UNDERFLOW: An attempt has been made to perform an operation that would cause an internal stack to underflow";
-#endif
-    case GL_OUT_OF_MEMORY: return "GL_OUT_OF_MEMORY: There is not enough memory left to execute the command. The state of the GL is undefined, except for the state of the error flags, after this error is recorded";
-    case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete. The offending command is ignored and has no other side effect than to set the error flag";
-#ifdef ARB_KHR_robustness
-      // https://www.opengl.org/wiki/OpenGL_Error
-    case GL_CONTEXT_LOST: return "GL_CONTEXT_LOST: Given if the OpenGL context has been lost, due to a graphics card reset";
-#endif
-    default: sprintf (last_error_buffer, "0x%X", x); return last_error_buffer;
-  }
-}
-
-
-//void CHECK_CUDA(cudaError_t err);
-//void CHECK_CUDA(cudaError_t err) {
-//  if(err != cudaSuccess) {
-//    std::cerr << "Error: " << cudaGetErrorString(err) << std::endl;
-//    exit(-1);
-//  }
-//}
-
-void CHECK_ERROR_GL();
-void CHECK_ERROR_GL() {
-  GLenum err = glGetError();
-  if(err != GL_NO_ERROR) {
-    std::cerr << "GL Error: " << gluErrorString(err) << std::endl;
-    exit(-1);
-  }
-}
-
-
-void printWorkGroupCount();
-void printWorkGroupCount() {
-  int work_grp_cnt[3];
-
-  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &work_grp_cnt[0]);
-  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &work_grp_cnt[1]);
-  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &work_grp_cnt[2]);
-
-  std::cout << "max global (total) work group size x: "  << work_grp_cnt[0]
-            << " y: " << work_grp_cnt[1]
-            << " z: " << work_grp_cnt[2] << std::endl << std::endl;
-}
-
-void printWorkGroupSize();
-void printWorkGroupSize() {
-  int work_grp_size[3];
-
-  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0, &work_grp_size[0]);
-  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 1, &work_grp_size[1]);
-  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 2, &work_grp_size[2]);
-
-  std::cout << "max local (in order) work group sizes x: "  << work_grp_size[0]
-            << " y: " << work_grp_size[1]
-            << " z: " << work_grp_size[2] << std::endl << std::endl;
-}
-
-int printInvocations();
-int printInvocations() {
-  int work_grp_inv;
-  glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &work_grp_inv);
-
-  std::cout << "max local work group invocations " << work_grp_inv << std::endl << std::endl;
-
-  return work_grp_inv;
-}
-
 GLFWwindow* init_glfw();
 void init_glad();
 void framebuffer_size_callback(GLFWwindow *, int width, int height);
@@ -125,10 +46,12 @@ int main(int argc, char** argv) {
   auto [vertices, colors] = Pointcloud::load_ply(pcd_path);
   vertices.resize(10000);
   colors.resize(10000);
-  auto radii = compute_radii(vertices);
   auto vertices_d = thrust::device_vector<glm::vec4>(vertices.begin(), vertices.end());
   auto colors_d = thrust::device_vector<glm::vec4>(colors.begin(), colors.end());
-  auto radii_d = thrust::device_vector<float>(radii.begin(), radii.end());
+  auto radii_d = compute_radii(vertices_d);
+  cout << "Min radius: " << *std::min_element(radii_d.begin(), radii_d.end()) << endl;
+  cout << "Max radius: " << *std::max_element(radii_d.begin(), radii_d.end()) << endl;
+  cout << "Avg radius: " << std::accumulate(radii_d.begin(), radii_d.end(), 0.0f) / radii_d.size() << endl;
 
   try {
     auto window = init_glfw();

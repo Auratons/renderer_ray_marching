@@ -1,12 +1,74 @@
 #include <algorithm>
 #include <ostream>
+#include <string>
 
+#include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <kdtree/kdtree_flann.h>
 #include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 
 #include "utils.h"
+
+namespace glm {
+  std::ostream &operator<<(std::ostream &out, const glm::vec3 &v) {
+    out << v.x << " " << v.y << " " << v.z;
+    return out;
+  }
+}
+
+std::string gluErrorString(GLenum x) {
+  char last_error_buffer[20];
+  switch(x) {
+    case GL_NO_ERROR: return "GL_NO_ERROR: No error has been recorded";
+    case GL_INVALID_ENUM: return "GL_INVALID_ENUM: An unacceptable value is specified for an enumerated argument. The offending command is ignored and has no other side effect than to set the error flag";
+    case GL_INVALID_VALUE: return "GL_INVALID_VALUE: A numeric argument is out of range. The offending command is ignored and has no other side effect than to set the error flag";
+    case GL_INVALID_OPERATION: return "GL_INVALID_OPERATION: The specified operation is not allowed in the current state. The offending command is ignored and has no other side effect than to set the error flag";
+#ifdef LEGACY_OPENGL
+      case GL_STACK_OVERFLOW: return "GL_STACK_OVERFLOW: An attempt has been made to perform an operation that would cause an internal stack to overflow";
+    case GL_STACK_UNDERFLOW: return "GL_STACK_UNDERFLOW: An attempt has been made to perform an operation that would cause an internal stack to underflow";
+#endif
+    case GL_OUT_OF_MEMORY: return "GL_OUT_OF_MEMORY: There is not enough memory left to execute the command. The state of the GL is undefined, except for the state of the error flags, after this error is recorded";
+    case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete. The offending command is ignored and has no other side effect than to set the error flag";
+#ifdef ARB_KHR_robustness
+      // https://www.opengl.org/wiki/OpenGL_Error
+    case GL_CONTEXT_LOST: return "GL_CONTEXT_LOST: Given if the OpenGL context has been lost, due to a graphics card reset";
+#endif
+    default: sprintf (last_error_buffer, "0x%X", x); return last_error_buffer;
+  }
+}
+
+void print_workgroup_count() {
+  int work_grp_cnt[3];
+
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &work_grp_cnt[0]);
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &work_grp_cnt[1]);
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &work_grp_cnt[2]);
+
+  std::cout << "max global (total) work group size x: "  << work_grp_cnt[0]
+            << " y: " << work_grp_cnt[1]
+            << " z: " << work_grp_cnt[2] << std::endl << std::endl;
+}
+
+void print_workgroup_size() {
+  int work_grp_size[3];
+
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0, &work_grp_size[0]);
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 1, &work_grp_size[1]);
+  glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 2, &work_grp_size[2]);
+
+  std::cout << "max local (in order) work group sizes x: "  << work_grp_size[0]
+            << " y: " << work_grp_size[1]
+            << " z: " << work_grp_size[2] << std::endl << std::endl;
+}
+
+int print_invocations() {
+  int work_grp_inv;
+  glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &work_grp_inv);
+
+  std::cout << "max local work group invocations " << work_grp_inv << std::endl << std::endl;
+
+  return work_grp_inv;
+}
 
 std::vector<bool> filter_view_frustrum(const glm::mat4 &view, const std::vector<glm::vec3> &pts, float ratio, float fov_rad) {
   // Generate homogeneous point for a frustrum-edge-lying point
@@ -49,11 +111,8 @@ std::vector<bool> filter_view_frustrum(const glm::mat4 &view, const std::vector<
   return std::vector<bool>{is_in_frustrum.begin(), is_in_frustrum.end()};
 }
 
-std::vector<float> compute_radii(const std::vector<glm::vec4> &vertices) {
-  const auto stride = 4;
-  auto points = thrust::device_vector<float>(vertices.size() * stride);  // Homogeneous one.
-  for (size_t idx = 0; idx < vertices.size(); ++idx)
-    thrust::copy((float*)&vertices[idx], (float*)&vertices[idx] + 4, &points[idx * stride]);
+thrust::device_vector<float> compute_radii(const thrust::device_vector<glm::vec4> &vertices) {
+  auto points = thrust::device_vector<float>(thrust::device_ptr<float>((float*)vertices.data().get()), thrust::device_ptr<float>((float*)vertices.data().get()) + 4 * vertices.size());  // Homogeneous one.
   auto query = thrust::device_vector<float>(points.begin(), points.end());
 
   thrust::device_vector<int> indices;
@@ -63,10 +122,16 @@ std::vector<float> compute_radii(const std::vector<glm::vec4> &vertices) {
   tree.Build(points);
   tree.Search(query, params, indices, distances);
 
-//  thrust::copy(distances.begin(), distances.end(), ostream_iterator<float>(cout, "\n"));
-  auto radii = std::vector<float>(vertices.size());
+//  thrust::copy(distances.begin(), distances.end(), std::ostream_iterator<float>(std::cout, "\n"));
   for (size_t i = 1; i < indices.size(); i+=2) {
-    radii[indices[i]] = std::clamp(distances[i] / 2, 0.0f, 5.0f);
+    distances[i / 2] = distances[i];
   }
-  return radii;
+  distances.resize(distances.size() / 2);
+  thrust::transform(
+    distances.begin(), distances.end(),
+    distances.begin(),
+    [] __device__ (const float &i){ return (i > 10.0f) ? 10.0f : i; }
+  );
+
+  return distances;
 }

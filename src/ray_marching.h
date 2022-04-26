@@ -32,8 +32,6 @@ public:
     const thrust::device_vector<float> &radii,
     GLuint texture_handle);
 
-  static PointcloudRayMarcher *get_instance();
-
   void render_to_texture(const glm::mat4 &view, float fov_radians);
 };
 

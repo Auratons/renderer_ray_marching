@@ -1,12 +1,14 @@
 #include <iostream>
 
+#include "utils.h"
+#include "common.h"
+#include "ray_marching.h"
+
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 #include <glm/glm.hpp>
 #include <helper_math.h>
-
-#include "common.h"
-#include "ray_marching.h"
+#include <kdtree/kdtree_flann.h>
 
 __device__ glm::mat4     VIEW;
 __device__ float         FOV_RADIANS;
@@ -70,8 +72,8 @@ __global__ void render()
 void PointcloudRayMarcher::render_to_texture(
   const glm::mat4 &view,
   float fov_radians) {
-  cudaCheckError( cudaMemcpyToSymbol(VIEW, &view, sizeof(view)) );
-  cudaCheckError( cudaMemcpyToSymbol(FOV_RADIANS, &fov_radians, sizeof(fov_radians)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(VIEW, &view, sizeof(view)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FOV_RADIANS, &fov_radians, sizeof(fov_radians)) );
 
   // Generate homogeneous point for a frustrum-edge-lying point
   auto v = [fov_radians] (float x, float y){
@@ -109,9 +111,9 @@ void PointcloudRayMarcher::render_to_texture(
       return in;
     }
   ) - frustrum_vertices_idx.begin();
-  cudaCheckError( cudaMemcpyToSymbol(FRUSTRUM_VERTICES_CNT, &frustrum_pcd_size, sizeof(frustrum_pcd_size)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTRUM_VERTICES_CNT, &frustrum_pcd_size, sizeof(frustrum_pcd_size)) );
 
-  cudaCheckError(
+  CHECK_ERROR_CUDA(
     cudaGraphicsGLRegisterImage(
       &cuda_image_resource_handle,
       TEXTURE_HANDLE,
@@ -119,15 +121,15 @@ void PointcloudRayMarcher::render_to_texture(
       cudaGraphicsRegisterFlagsSurfaceLoadStore
     )
   );
-  cudaCheckError( cudaGraphicsMapResources(1, &cuda_image_resource_handle) );
-  cudaCheckError( cudaGraphicsSubResourceGetMappedArray(&cuda_image, cuda_image_resource_handle, 0, 0) );
-  cudaCheckError( cudaBindSurfaceToArray(surfaceWrite, cuda_image) );
+  CHECK_ERROR_CUDA( cudaGraphicsMapResources(1, &cuda_image_resource_handle) );
+  CHECK_ERROR_CUDA( cudaGraphicsSubResourceGetMappedArray(&cuda_image, cuda_image_resource_handle, 0, 0) );
+  CHECK_ERROR_CUDA( cudaBindSurfaceToArray(surfaceWrite, cuda_image) );
   dim3 block_dim(32, 32, 1);
   dim3 grid_dim(SCREEN_WIDTH / block_dim.x, SCREEN_HEIGHT / block_dim.y, 1);
   render<<< grid_dim, block_dim >>>();
-  cudaCheckError();
-  cudaCheckError( cudaGraphicsUnmapResources(1, &cuda_image_resource_handle) );
-  cudaCheckError( cudaGraphicsUnregisterResource(cuda_image_resource_handle) );
+  CHECK_ERROR_CUDA();
+  CHECK_ERROR_CUDA( cudaGraphicsUnmapResources(1, &cuda_image_resource_handle) );
+  CHECK_ERROR_CUDA( cudaGraphicsUnregisterResource(cuda_image_resource_handle) );
 }
 
 /*
@@ -145,33 +147,23 @@ PointcloudRayMarcher *PointcloudRayMarcher::get_instance(
   return instance;
 }
 
-/*
- * Not thread safe.
- */
-PointcloudRayMarcher *PointcloudRayMarcher::get_instance() {
-  if(instance == nullptr) {
-    throw std::runtime_error("Renderer not initialized.");
-  }
-  return instance;
-}
-
 PointcloudRayMarcher::PointcloudRayMarcher(
   const thrust::device_vector<glm::vec4> &vertices,
   const thrust::device_vector<glm::vec4> &colors,
   const thrust::device_vector<float> &radii) : vertices(vertices), colors(colors), radii(radii) {
   auto ptr = reinterpret_cast<const float4 *>(vertices.data().get());
-  cudaCheckError( cudaMemcpyToSymbol(VERTICES, &ptr, sizeof(ptr)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(VERTICES, &ptr, sizeof(ptr)) );
   ptr = reinterpret_cast<const float4 *>(colors.data().get());
-  cudaCheckError( cudaMemcpyToSymbol(COLORS, &ptr, sizeof(ptr)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(COLORS, &ptr, sizeof(ptr)) );
   auto ptr_f = radii.data().get();
-  cudaCheckError( cudaMemcpyToSymbol(RADII, &ptr_f, sizeof(ptr_f)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(RADII, &ptr_f, sizeof(ptr_f)) );
   auto pointcloud_size = vertices.size();
-  cudaCheckError( cudaMemcpyToSymbol(POINTCLOUD_SIZE, &pointcloud_size, sizeof(pointcloud_size)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(POINTCLOUD_SIZE, &pointcloud_size, sizeof(pointcloud_size)) );
   auto ptr_v = reinterpret_cast<float *>(frustrum_edge_pts_world_tmp.data().get());
-  cudaCheckError( cudaMemcpyToSymbol(FRUSTRUM_EDGE_PTS_WORLD_TMP, &ptr_v, sizeof(ptr_v)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTRUM_EDGE_PTS_WORLD_TMP, &ptr_v, sizeof(ptr_v)) );
   frustrum_vertices_idx.resize(pointcloud_size);
   auto ptr_s = frustrum_vertices_idx.data().get();
-  cudaCheckError( cudaMemcpyToSymbol(FRUSTRUM_VERTICES_IDX, &ptr_s, sizeof(ptr_s)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTRUM_VERTICES_IDX, &ptr_s, sizeof(ptr_s)) );
 }
 
 __device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir) {

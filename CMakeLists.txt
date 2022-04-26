@@ -43,6 +43,7 @@ target_link_libraries(${PROJECT_NAME}
   glfw
   OpenGL::GL
   dl
+  CUDA::toolkit
 #  GLUT::GLUT
 #  X11
 #  Xrandr
@@ -51,7 +52,6 @@ target_link_libraries(${PROJECT_NAME}
 #  Xxf86vm
 #  Xcursor
 #  pthread
-#  CUDA::toolkit
 )
 
 # https://cmake.org/cmake/help/latest/variable/CMAKE_LANG_COMPILER_ID.htmlq
