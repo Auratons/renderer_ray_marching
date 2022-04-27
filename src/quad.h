@@ -3,13 +3,21 @@
 
 #include <glad/glad.h>
 
+#include "shader.h"
+
+
 class Quad {
 private:
     GLuint vao = 0;
     GLuint vbo = 0;
+    Shader shader;
 
 public:
-    Quad();
+    /*
+     * Constructs 6 vertices for quad displaying  texture.
+     * Shader is expected to use one sampler2D uniform under shader unit 0.
+     */
+    explicit Quad(const Shader &shader);
     ~Quad();
 
     [[nodiscard]] auto get_id() const noexcept {
@@ -23,6 +31,8 @@ public:
     void unbind() const noexcept {
       glBindVertexArray(0);
     }
+
+    void render(GLuint texture_id) const noexcept;
 };
 
 

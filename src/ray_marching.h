@@ -5,6 +5,8 @@
 #include <glm/glm.hpp>
 #include <thrust/device_vector.h>
 
+#include "texture.h"
+
 class PointcloudRayMarcher {
 private:
     static PointcloudRayMarcher *instance;
@@ -14,12 +16,14 @@ private:
     thrust::device_vector<glm::vec4> frustrum_edge_pts_world_tmp = thrust::device_vector<glm::vec4>(4);
     thrust::device_vector<size_t> frustrum_vertices_idx;
     size_t frustrum_pcd_size = 0;
+    Texture2D texture;
 
 protected:
   PointcloudRayMarcher(
     const thrust::device_vector<glm::vec4> &vertices,
     const thrust::device_vector<glm::vec4> &colors,
-    const thrust::device_vector<float> &radii
+    const thrust::device_vector<float> &radii,
+    const Texture2D &texture
   );
 
 public:
@@ -30,9 +34,15 @@ public:
     const thrust::device_vector<glm::vec4> &vertices,
     const thrust::device_vector<glm::vec4> &colors,
     const thrust::device_vector<float> &radii,
-    GLuint texture_handle);
+    const Texture2D &texture);
 
   void render_to_texture(const glm::mat4 &view, float fov_radians);
+
+  [[nodiscard]] const Texture2D& get_texture() const noexcept {
+    return texture;
+  }
+
+  void save_png(const std::string &path);
 };
 
 #endif //POINTCLOUD_RENDERER_RAY_MARCHING_H

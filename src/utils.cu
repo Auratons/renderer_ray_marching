@@ -16,7 +16,7 @@ namespace glm {
   }
 }
 
-std::string gluErrorString(GLenum x) {
+std::string glu_error_string(GLenum x) {
   char last_error_buffer[20];
   switch(x) {
     case GL_NO_ERROR: return "GL_NO_ERROR: No error has been recorded";

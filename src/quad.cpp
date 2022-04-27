@@ -1,7 +1,7 @@
 #include "quad.h"
-#include <iostream>
 
-Quad::Quad() {
+
+Quad::Quad(const Shader &shader) : shader(shader) {
   constexpr GLfloat vbo_data[] = {
     -1.0f,  1.0f, 0.0f, 0.0f, 1.0f,
     -1.0f, -1.0f, 0.0f, 0.0f, 0.0f,
@@ -30,4 +30,13 @@ Quad::Quad() {
 Quad::~Quad() {
   glDeleteVertexArrays(1, &vao);
   glDeleteBuffers(1, &vbo);
+}
+
+void Quad::render(GLuint texture_id) const noexcept {
+  shader.use();
+  bind();
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, texture_id);
+  glDrawArrays(GL_TRIANGLES, 0, 6);
+  unbind();
 }

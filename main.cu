@@ -7,9 +7,9 @@
 #include "CLI/App.hpp"
 #include "CLI/Formatter.hpp"
 #include "CLI/Config.hpp"
+#include <cuda_runtime.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <cuda_runtime.h>
 #include <thrust/device_vector.h>
 
 #include "camera.h"
@@ -18,7 +18,8 @@
 #include "quad.h"
 #include "ray_marching.h"
 #include "shader.h"
-#include "utils.h"
+#include "texture.h"
+
 
 float lastX = SCREEN_WIDTH / 2.0f;
 float lastY = SCREEN_HEIGHT / 2.0f;
@@ -73,28 +74,17 @@ int main(int argc, char** argv) {
       cerr << "Shader failure, exiting." << endl;
       return -1;
     }
-    auto quad = Quad();
-
-    GLuint texOutput;
-    glGenTextures(1, &texOutput);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texOutput);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGBA, GL_FLOAT, nullptr);
-    glBindImageTexture(0, texOutput, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-
-    double lastTime      = 0.0;
-    unsigned int counter = 0;
-
-    auto renderer = PointcloudRayMarcher::get_instance(
+    auto quad = Quad(graphical_shader);
+    auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
+    auto ray_marcher = PointcloudRayMarcher::get_instance(
       vertices_d,
       colors_d,
       radii_d,
-      texOutput
+      texture
     );
+
+    double lastTime      = 0.0;
+    unsigned int counter = 0;
 
     // render loop
     while (!glfwWindowShouldClose(window)) {
@@ -104,15 +94,9 @@ int main(int argc, char** argv) {
 
       process_input(window);
 
-      renderer->render_to_texture(camera.GetViewMatrix(), glm::radians(camera.Zoom));
-
-      graphical_shader.use();
-      quad.bind();
-      glClear(GL_COLOR_BUFFER_BIT);
-      glActiveTexture(GL_TEXTURE0);
-      glBindTexture(GL_TEXTURE_2D, texOutput);
-      glDrawArrays(GL_TRIANGLES, 0, 6);
-      quad.unbind();
+      ray_marcher->render_to_texture(camera.GetViewMatrix(), glm::radians(camera.Zoom));
+      ray_marcher->save_png("test_image.png");
+      quad.render(ray_marcher->get_texture().get_id());
 
       ++counter;
       auto currentTime = glfwGetTime();

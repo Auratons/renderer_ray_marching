@@ -29,9 +29,11 @@ add_executable(${PROJECT_NAME}
   main.cu
   src/shader.cpp
   src/quad.cpp
+  src/texture.cpp
   src/pointcloud.cpp
   src/utils.cu
   src/ray_marching.cu
+  include/stb_image_write.cpp
 )
 
 target_link_libraries(${PROJECT_NAME}

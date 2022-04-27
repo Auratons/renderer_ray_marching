@@ -9,6 +9,8 @@
 #include <glm/glm.hpp>
 #include <helper_math.h>
 #include <kdtree/kdtree_flann.h>
+#include <stb_image_write.h>
+#include <thrust/device_vector.h>
 
 __device__ glm::mat4     VIEW;
 __device__ float         FOV_RADIANS;
@@ -132,6 +134,16 @@ void PointcloudRayMarcher::render_to_texture(
   CHECK_ERROR_CUDA( cudaGraphicsUnregisterResource(cuda_image_resource_handle) );
 }
 
+void PointcloudRayMarcher::save_png(const std::string &filename) {
+  auto raw_data = texture.get_texture_data<float>();
+  auto png = std::vector<unsigned char>(sizeof(float) * SCREEN_WIDTH * SCREEN_HEIGHT);
+  std::transform(raw_data.begin(), raw_data.end(), png.begin(), [](auto val){ return val * 255.0f; });
+  // OpenGL expects the 0.0 coordinate on the y-axis to be on the bottom side of the image, but images usually
+  // have 0.0 at the top of the y-axis. For now, this unifies output with the visualisation on the screen.
+  stbi_flip_vertically_on_write(true);
+  stbi_write_png(filename.c_str(), SCREEN_WIDTH, SCREEN_HEIGHT, 4, png.data(), 4 * SCREEN_WIDTH); // 4=RGBA
+}
+
 /*
  * Not thread safe.
  */
@@ -139,10 +151,10 @@ PointcloudRayMarcher *PointcloudRayMarcher::get_instance(
   const thrust::device_vector<glm::vec4> &vertices,
   const thrust::device_vector<glm::vec4> &colors,
   const thrust::device_vector<float> &radii,
-  GLuint texture_handle) {
-  TEXTURE_HANDLE = texture_handle;
+  const Texture2D &texture) {
+  TEXTURE_HANDLE = texture.get_id();
   if(instance == nullptr) {
-    instance = new PointcloudRayMarcher(vertices, colors, radii);
+    instance = new PointcloudRayMarcher(vertices, colors, radii, texture);
   }
   return instance;
 }
@@ -150,7 +162,8 @@ PointcloudRayMarcher *PointcloudRayMarcher::get_instance(
 PointcloudRayMarcher::PointcloudRayMarcher(
   const thrust::device_vector<glm::vec4> &vertices,
   const thrust::device_vector<glm::vec4> &colors,
-  const thrust::device_vector<float> &radii) : vertices(vertices), colors(colors), radii(radii) {
+  const thrust::device_vector<float> &radii,
+  const Texture2D &texture) : vertices(vertices), colors(colors), radii(radii), texture(texture) {
   auto ptr = reinterpret_cast<const float4 *>(vertices.data().get());
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(VERTICES, &ptr, sizeof(ptr)) );
   ptr = reinterpret_cast<const float4 *>(colors.data().get());

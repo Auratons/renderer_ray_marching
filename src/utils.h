@@ -7,6 +7,11 @@
 #include <glm/glm.hpp>
 #include <thrust/device_vector.h>
 
+// Mimics https://www.opengl.org/sdk/docs/man2/xhtml/gluErrorString.xml
+// Supports all error codes listed here: https://www.opengl.org/sdk/docs/man/docbook4/xhtml/glGetError.xml
+// https://github.com/gustafsson/freq/blob/master/lib/gpumisc/gluerrorstring.h
+std::string glu_error_string(GLenum);
+
 
 #define CHECK_ERROR_CUDA(EXPRESSION) { \
   EXPRESSION; \
@@ -21,7 +26,7 @@
   EXPRESSION; \
   GLenum err = glGetError(); \
   if(err != GL_NO_ERROR) { \
-    std::cerr << "GL ERROR: " __FILE__ << " " << __LINE__ << " " << gluErrorString(err) << std::endl; \
+    std::cerr << "GL ERROR: " __FILE__ << " " << __LINE__ << " " << glu_error_string(err) << std::endl; \
     exit(1); \
   } \
 }
@@ -32,10 +37,7 @@ inline void glBufferData(GLenum target, const std::vector<T>& v, GLenum usage) {
   glad_glBufferData(target, v.size() * sizeof(T), &v[0], usage);
 }
 
-
-std::string gluErrorString(GLenum);
-
-// A pack of fuctions for compute shader related information.
+// A pack of functions for compute shader related information.
 void print_workgroup_count();
 void print_workgroup_size();
 int print_invocations();
