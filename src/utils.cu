@@ -3,6 +3,7 @@
 #include <string>
 
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <kdtree/kdtree_flann.h>
 #include <thrust/device_vector.h>
@@ -34,6 +35,27 @@ std::string glu_error_string(GLenum x) {
     case GL_CONTEXT_LOST: return "GL_CONTEXT_LOST: Given if the OpenGL context has been lost, due to a graphics card reset";
 #endif
     default: sprintf (last_error_buffer, "0x%X", x); return last_error_buffer;
+  }
+}
+
+std::string egl_error_string(EGLint error) {
+  switch(error){
+    case EGL_NOT_INITIALIZED: return "EGL_NOT_INITIALIZED: EGL is not initialized, or could not be initialized, for the specified EGL display connection.";
+    case EGL_BAD_ACCESS: return "EGL_BAD_ACCESS: EGL cannot access a requested resource (for example a context is bound in another thread).";
+    case EGL_BAD_ALLOC: return "EGL_BAD_ALLOC: EGL failed to allocate resources for the requested operation.";
+    case EGL_BAD_ATTRIBUTE: return "EGL_BAD_ATTRIBUTE: An unrecognized attribute or attribute value was passed in the attribute list.";
+    case EGL_BAD_CONTEXT: return "EGL_BAD_CONTEXT: An EGLContext argument does not name a valid EGL rendering context.";
+    case EGL_BAD_CONFIG: return "EGL_BAD_CONFIG: An EGLConfig argument does not name a valid EGL frame buffer configuration.";
+    case EGL_BAD_CURRENT_SURFACE: return "EGL_BAD_CURRENT_SURFACE: The current surface of the calling thread is a window, pixel buffer or pixmap that is no longer valid.";
+    case EGL_BAD_DISPLAY: return "EGL_BAD_DISPLAY: An EGLDisplay argument does not name a valid EGL display connection.";
+    case EGL_BAD_SURFACE: return "EGL_BAD_SURFACE: An EGLSurface argument does not name a valid surface (window, pixel buffer or pixmap) configured for GL rendering.";
+    case EGL_BAD_MATCH: return "EGL_BAD_MATCH: Arguments are inconsistent (for example, a valid context requires buffers not supplied by a valid surface).";
+    case EGL_BAD_PARAMETER: return "EGL_BAD_PARAMETER: One or more argument values are invalid.";
+    case EGL_BAD_NATIVE_PIXMAP: return "EGL_BAD_NATIVE_PIXMAP: A NativePixmapType argument does not refer to a valid native pixmap.";
+    case EGL_BAD_NATIVE_WINDOW: return "EGL_BAD_NATIVE_WINDOW: A NativeWindowType argument does not refer to a valid native window.";
+    case EGL_CONTEXT_LOST: return "EGL_CONTEXT_LOST: A power management event has occurred. The application must destroy all contexts and reinitialise OpenGL ES state and objects to continue rendering.";
+    default:
+      throw std::runtime_error("Failed to configure EGL Display: unknown error");
   }
 }
 
@@ -134,4 +156,14 @@ thrust::device_vector<float> compute_radii(const thrust::device_vector<glm::vec4
   );
 
   return distances;
+}
+
+void FPSCounter::update() {
+  ++counter;
+
+  if (glfwGetTime() - lastTime >= 1.0) {
+    std::cout << counter << " FPS" << std::endl;
+    ++lastTime;
+    counter = 0;
+  }
 }

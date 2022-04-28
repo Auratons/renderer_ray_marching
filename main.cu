@@ -8,6 +8,7 @@
 #include "CLI/Formatter.hpp"
 #include "CLI/Config.hpp"
 #include <cuda_runtime.h>
+#include <EGL/egl.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <thrust/device_vector.h>
@@ -19,6 +20,7 @@
 #include "ray_marching.h"
 #include "shader.h"
 #include "texture.h"
+#include "utils.h"
 
 
 float lastX = SCREEN_WIDTH / 2.0f;
@@ -31,37 +33,46 @@ auto camera = Camera();
 using namespace std;
 
 GLFWwindow* init_glfw();
-void init_glad();
-void framebuffer_size_callback(GLFWwindow *, int width, int height);
-void mouse_callback(GLFWwindow* window, double xpos, double ypos);
-void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
-void process_input(GLFWwindow *window);
+EGLDisplay  init_egl();
+void        init_glad(GLADloadproc pointer);
+void        framebuffer_size_callback(GLFWwindow *, int width, int height);
+void        mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void        scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
+void        process_input(GLFWwindow *window);
 
 
 int main(int argc, char** argv) {
-  CLI::App args{"Pointcloud Renderer"};
   string pcd_path;
-  args.add_option("-f,--file", pcd_path, "A help string");
+  bool headless;
+
+  CLI::App args{"Pointcloud Renderer"};
+  args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
+  args.add_flag("-d,--headless", headless, "Run headlessly without a window");
   CLI11_PARSE(args, argc, argv);
 
-  auto [vertices, colors] = Pointcloud::load_ply(pcd_path);
-  vertices.resize(10000);
-  colors.resize(10000);
-  auto vertices_d = thrust::device_vector<glm::vec4>(vertices.begin(), vertices.end());
-  auto colors_d = thrust::device_vector<glm::vec4>(colors.begin(), colors.end());
-  auto radii_d = compute_radii(vertices_d);
-  cout << "Min radius: " << *std::min_element(radii_d.begin(), radii_d.end()) << endl;
-  cout << "Max radius: " << *std::max_element(radii_d.begin(), radii_d.end()) << endl;
-  cout << "Avg radius: " << std::accumulate(radii_d.begin(), radii_d.end(), 0.0f) / radii_d.size() << endl;
+  auto [vertices_host, colors_host] = Pointcloud::load_ply(pcd_path);
+  vertices_host.resize(10000);
+  colors_host.resize(10000);
+  auto vertices = thrust::device_vector<glm::vec4>(vertices_host.begin(), vertices_host.end());
+  auto colors = thrust::device_vector<glm::vec4>(colors_host.begin(), colors_host.end());
+  auto radii = compute_radii(vertices);
+  cout << "Min radius: " << *std::min_element(radii.begin(), radii.end()) << endl;
+  cout << "Max radius: " << *std::max_element(radii.begin(), radii.end()) << endl;
+  cout << "Avg radius: " << std::accumulate(radii.begin(), radii.end(), 0.0f) / (float)radii.size() << endl;
 
+  GLFWwindow* window;
+  EGLDisplay display;
+
+  auto successful_run = true;
   try {
-    auto window = init_glfw();
-    init_glad();
-
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetCursorPosCallback(window, mouse_callback);
-    glfwSetScrollCallback(window, scroll_callback);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    if (headless) {
+      display = init_egl();
+      init_glad((GLADloadproc)eglGetProcAddress);
+    }
+    else {
+      window = init_glfw();
+      init_glad((GLADloadproc)glfwGetProcAddress);
+    }
 
     glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -69,54 +80,41 @@ int main(int argc, char** argv) {
 
     auto shader_path_vertex = filesystem::current_path() / "shaders/vertex.glsl";
     auto shader_path_fragment = filesystem::current_path() / "shaders/fragment.glsl";
-    auto graphical_shader = Shader({shader_path_vertex, shader_path_fragment}, {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER});
-    if (!graphical_shader.good()) {
-      cerr << "Shader failure, exiting." << endl;
-      return -1;
-    }
-    auto quad = Quad(graphical_shader);
+    auto shader_graphical = Shader({shader_path_vertex, shader_path_fragment}, {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER});
+    auto quad = Quad(shader_graphical);
     auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-    auto ray_marcher = PointcloudRayMarcher::get_instance(
-      vertices_d,
-      colors_d,
-      radii_d,
-      texture
-    );
+    auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
 
-    double lastTime      = 0.0;
-    unsigned int counter = 0;
-
-    // render loop
-    while (!glfwWindowShouldClose(window)) {
-      auto currentFrame = static_cast<float>(glfwGetTime());
-      deltaTime = currentFrame - lastFrame;
-      lastFrame = currentFrame;
-
-      process_input(window);
-
+    if (headless) {
       ray_marcher->render_to_texture(camera.GetViewMatrix(), glm::radians(camera.Zoom));
-      ray_marcher->save_png("test_image.png");
+      ray_marcher->save_png("test_image_egl.png");
       quad.render(ray_marcher->get_texture().get_id());
+    }
+    else {
+      FPSCounter fps;
 
-      ++counter;
-      auto currentTime = glfwGetTime();
+      // render loop
+      while (!glfwWindowShouldClose(window)) {
+        auto currentFrame = static_cast<float>(glfwGetTime());
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
 
-      if (currentTime - lastTime >= 1.0) {
-        cout << counter << " FPS" << endl;
-        ++lastTime;
-        counter = 0;
+        ray_marcher->render_to_texture(camera.GetViewMatrix(), glm::radians(camera.Zoom));
+        quad.render(ray_marcher->get_texture().get_id());
+
+        fps.update();
+        process_input(window);
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
       }
-
-      glfwSwapBuffers(window);
-      glfwPollEvents();
     }
   }
   catch (const std::exception &) {
-    glfwTerminate();
-    return EXIT_FAILURE;
+    successful_run = false;
   }
-  glfwTerminate();
-  return EXIT_SUCCESS;
+  if (!headless) glfwTerminate(); else eglTerminate(display);
+  return (successful_run) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 GLFWwindow* init_glfw() {
@@ -130,14 +128,54 @@ GLFWwindow* init_glfw() {
   auto window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Pointcloud Renderer", nullptr, nullptr);
   if (!window) {
     std::cerr << "Fatal error: Failed to create GLFW window." << std::endl;
-    throw std::exception();
+    exit(1);
   }
   glfwMakeContextCurrent(window);
+  glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+  glfwSetCursorPosCallback(window, mouse_callback);
+  glfwSetScrollCallback(window, scroll_callback);
+//    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
   return window;
 }
 
-void init_glad() {
-  if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
+EGLDisplay  init_egl() {
+  static const EGLint configAttribs[] = {
+    EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+    EGL_BLUE_SIZE, 8,
+    EGL_GREEN_SIZE, 8,
+    EGL_RED_SIZE, 8,
+    EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+    EGL_NONE
+  };
+
+  static const EGLint pbufferAttribs[] = {
+    EGL_WIDTH, (EGLint)SCREEN_WIDTH,
+    EGL_HEIGHT, (EGLint)SCREEN_HEIGHT,
+    EGL_NONE,
+  };
+  EGLDisplay eglDpy;
+  // 1. Initialize EGL
+  CHECK_ERROR_EGL(eglDpy = eglGetDisplay(EGL_DEFAULT_DISPLAY));
+  EGLint major, minor;
+  CHECK_ERROR_EGL(eglInitialize(eglDpy, &major, &minor));
+  // 2. Select an appropriate configuration
+  EGLint numConfigs;
+  EGLConfig eglCfg;
+  CHECK_ERROR_EGL(eglChooseConfig(eglDpy, configAttribs, &eglCfg, 1, &numConfigs));
+  // 3. Create a surface
+  EGLSurface eglSurf;
+  CHECK_ERROR_EGL(eglSurf = eglCreatePbufferSurface(eglDpy, eglCfg, pbufferAttribs));
+  // 4. Bind the API
+  CHECK_ERROR_EGL(eglBindAPI(EGL_OPENGL_API));
+  // 5. Create a context and make it current
+  EGLContext eglCtx;
+  CHECK_ERROR_EGL(eglCtx = eglCreateContext(eglDpy, eglCfg, EGL_NO_CONTEXT, nullptr));
+  CHECK_ERROR_EGL(eglMakeCurrent(eglDpy, eglSurf, eglSurf, eglCtx));
+  return eglDpy;
+}
+
+void init_glad(GLADloadproc pointer) {
+  if (!gladLoadGLLoader(pointer)) {
     std::cerr << "Failed to initialize GLAD." << std::endl;
     throw std::exception();
   }

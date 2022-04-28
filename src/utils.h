@@ -3,6 +3,7 @@
 
 #include <vector>
 
+#include <EGL/egl.h>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <thrust/device_vector.h>
@@ -11,6 +12,9 @@
 // Supports all error codes listed here: https://www.opengl.org/sdk/docs/man/docbook4/xhtml/glGetError.xml
 // https://github.com/gustafsson/freq/blob/master/lib/gpumisc/gluerrorstring.h
 std::string glu_error_string(GLenum);
+
+// Supports all error codes listed here: https://www.khronos.org/registry/EGL/sdk/docs/man/html/eglGetError.xhtml
+std::string egl_error_string(EGLint);
 
 
 #define CHECK_ERROR_CUDA(EXPRESSION) { \
@@ -31,6 +35,15 @@ std::string glu_error_string(GLenum);
   } \
 }
 
+#define CHECK_ERROR_EGL(EXPRESSION) { \
+  EXPRESSION; \
+  EGLint err = eglGetError(); \
+  if(err != EGL_SUCCESS) { \
+    std::cerr << "EGL ERROR: " __FILE__ << " " << __LINE__ << " " << egl_error_string(err) << std::endl; \
+    exit(1); \
+  } \
+}
+
 #undef glBufferData
 template <class T>
 inline void glBufferData(GLenum target, const std::vector<T>& v, GLenum usage) {
@@ -45,5 +58,14 @@ int print_invocations();
 thrust::device_vector<float> compute_radii(const thrust::device_vector<glm::vec4> &vertices);
 
 std::vector<bool> filter_view_frustrum(const glm::mat4 &view, const std::vector<glm::vec3> &pts, float ratio, float fov_rad);
+
+class FPSCounter {
+private:
+  double lastTime = 0.0;
+  unsigned int counter = 0;
+
+public:
+  void update();
+};
 
 #endif //POINTCLOUD_RENDERER_UTILS_H

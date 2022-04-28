@@ -20,7 +20,7 @@ set(CMAKE_CUDA_STANDARD 17)
 
 find_package(glfw3 3.3 REQUIRED)
 find_package(CUDAToolkit REQUIRED)
-find_package(OpenGL REQUIRED)
+find_package(OpenGL REQUIRED COMPONENTS OpenGL EGL GLX)
 find_package(CLI11 CONFIG REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile_commands.json
@@ -44,6 +44,9 @@ target_link_libraries(${PROJECT_NAME}
   CLI11::CLI11
   glfw
   OpenGL::GL
+  OpenGL::OpenGL
+  OpenGL::EGL
+  OpenGL::GLX
   dl
   CUDA::toolkit
 #  GLUT::GLUT

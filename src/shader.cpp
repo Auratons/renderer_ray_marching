@@ -57,6 +57,9 @@ Shader::Shader(const std::vector<std::string> &paths, const std::vector<GLenum> 
     glDeleteShader(shader);
 
   ID = shader_program;
+
+  if (!good())
+    throw std::runtime_error("Shader failure.");
 }
 
 std::string Shader::read_shader_file(const std::string &path) {
