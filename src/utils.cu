@@ -134,7 +134,7 @@ std::vector<bool> filter_view_frustrum(const glm::mat4 &view, const std::vector<
 }
 
 thrust::device_vector<float> compute_radii(const thrust::device_vector<glm::vec4> &vertices) {
-  auto points = thrust::device_vector<float>(thrust::device_ptr<float>((float*)vertices.data().get()), thrust::device_ptr<float>((float*)vertices.data().get()) + 4 * vertices.size());  // Homogeneous one.
+  auto points = thrust::device_vector<float>(thrust::device_ptr<float>((float*)vertices.data().get()), thrust::device_ptr<float>((float*)vertices.data().get()) + 4 * vertices.size());
   auto query = thrust::device_vector<float>(points.begin(), points.end());
 
   thrust::device_vector<int> indices;
@@ -146,7 +146,7 @@ thrust::device_vector<float> compute_radii(const thrust::device_vector<glm::vec4
 
 //  thrust::copy(distances.begin(), distances.end(), std::ostream_iterator<float>(std::cout, "\n"));
   for (size_t i = 1; i < indices.size(); i+=2) {
-    distances[i / 2] = distances[i];
+    distances[i / 2] = std::sqrt(distances[i]);  // KD tree returns squared distance
   }
   distances.resize(distances.size() / 2);
   thrust::transform(

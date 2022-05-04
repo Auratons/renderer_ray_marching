@@ -2,7 +2,7 @@
 
 namespace kdtree {
 
-int KDTreeFlann::Search(thrust::device_vector<float> &query,
+int KDTreeFlann::Search(const thrust::device_vector<float> &query,
                         const KDTreeSearchParams &param,
                         thrust::device_vector<int> &indices,
                         thrust::device_vector<float> &distance2) const {
@@ -62,12 +62,12 @@ int KDTreeFlann::Search(thrust::device_vector<float> &query,
 //    return std::make_tuple(I, D);
 //}
 
-int KDTreeFlann::SearchKNN(thrust::device_vector<float> &query,
+int KDTreeFlann::SearchKNN(const thrust::device_vector<float> &query,
                            int knn,
                            thrust::device_vector<int> &indices,
                            thrust::device_vector<float> &distance2) const {
     const int64_t n_query = query.size() / 4;
-    flann::Matrix<float> query_flann(thrust::raw_pointer_cast(query.data()), n_query, 3, sizeof(float) * 4);
+    flann::Matrix<float> query_flann((float*)thrust::raw_pointer_cast(query.data()), n_query, 3, sizeof(float) * 4);
 
     indices.resize(n_query * knn);
     distance2.resize(n_query * knn);
@@ -79,13 +79,13 @@ int KDTreeFlann::SearchKNN(thrust::device_vector<float> &query,
     return flann_index_->knnSearch(query_flann, indices_flann, dists_flann, knn, param);
 }
 
-int KDTreeFlann::SearchRadius(thrust::device_vector<float> &query,
+int KDTreeFlann::SearchRadius(const thrust::device_vector<float> &query,
                               float radius,
                               int max_nn,
                               thrust::device_vector<int> &indices,
                               thrust::device_vector<float> &distance2) const {
     const int64_t n_query = query.size() / 4;
-    flann::Matrix<float> query_flann(thrust::raw_pointer_cast(query.data()), n_query, 3, sizeof(float) * 4);
+    flann::Matrix<float> query_flann((float*)thrust::raw_pointer_cast(query.data()), n_query, 3, sizeof(float) * 4);
 
     indices.resize(n_query * max_nn);
     distance2.resize(n_query * max_nn);
@@ -98,7 +98,7 @@ int KDTreeFlann::SearchRadius(thrust::device_vector<float> &query,
     return flann_index_->radiusSearch(query_flann, indices_flann, dists_flann,float(radius * radius), param);
 }
 
-bool KDTreeFlann::Build(thrust::device_vector<float> &pcd) {
+bool KDTreeFlann::Build(const thrust::device_vector<float> &pcd) {
 //    if (!pcd.device().is_cuda() || !pcd.is_contiguous() || !(pcd.dtype() == torch::kFloat32)) {
 //        ERROR_MSG("[KDTreeFlann::Build] tensor must be float32, contiguous and on a cuda device!")
 //        return false;
@@ -109,11 +109,10 @@ bool KDTreeFlann::Build(thrust::device_vector<float> &pcd) {
 //    }
     // cudaSetDevice(pcd.device().index());
 
-    flann_dataset_ = std::make_unique<flann::Matrix<float>>(thrust::raw_pointer_cast(pcd.data()), pcd.size() / 4, 3, sizeof(float) * 4);
+    flann_dataset_ = std::make_unique<flann::Matrix<float>>((float*)thrust::raw_pointer_cast(pcd.data()), pcd.size() / 4, 3, sizeof(float) * 4);
     flann::KDTreeCuda3dIndexParams index_params;
     flann_index_ = std::make_unique<flann::KDTreeCuda3dIndex<flann::L2<float>>>(*flann_dataset_, index_params);
     flann_index_->buildIndex();
-    pcd_ = pcd;
     return true;
 }
 

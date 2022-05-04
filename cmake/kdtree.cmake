@@ -2,7 +2,7 @@
 # ---------------------
 file(GLOB_RECURSE FLANN_CU_SOURCES third_party/flann/*.cu)
 
-add_library(KDTREE
+add_library(KDTREE STATIC
     src/kdtree/kdtree_flann.cu
     ${FLANN_CU_SOURCES}
 )
