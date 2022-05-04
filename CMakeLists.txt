@@ -22,6 +22,7 @@ find_package(glfw3 3.3 REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(OpenGL REQUIRED COMPONENTS OpenGL EGL GLX)
 find_package(CLI11 CONFIG REQUIRED)
+find_package(nlohmann_json 3.10 REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile_commands.json
 
@@ -49,6 +50,7 @@ target_link_libraries(${PROJECT_NAME}
   OpenGL::GLX
   dl
   CUDA::toolkit
+  nlohmann_json::nlohmann_json
 #  GLUT::GLUT
 #  X11
 #  Xrandr

@@ -6,7 +6,14 @@
 #include <EGL/egl.h>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
+#include <nlohmann/json.hpp>
 #include <thrust/device_vector.h>
+
+namespace glm {
+  std::ostream &operator<<(std::ostream &out, const glm::vec3 &v);
+  std::ostream &operator<<(std::ostream &out, const glm::mat4 &m);
+  void from_json(const nlohmann::json &j, glm::mat4 &P);
+}
 
 // Mimics https://www.opengl.org/sdk/docs/man2/xhtml/gluErrorString.xml
 // Supports all error codes listed here: https://www.opengl.org/sdk/docs/man/docbook4/xhtml/glGetError.xml

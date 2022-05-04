@@ -116,4 +116,12 @@ bool KDTreeFlann::Build(const thrust::device_vector<float> &pcd) {
     return true;
 }
 
+bool KDTreeFlann::Build(float *pcd, size_t pcd_size) {
+  flann_dataset_ = std::make_unique<flann::Matrix<float>>(pcd, pcd_size, 3, sizeof(float) * 4);
+  flann::KDTreeCuda3dIndexParams index_params;
+  flann_index_ = std::make_unique<flann::KDTreeCuda3dIndex<flann::L2<float>>>(*flann_dataset_, index_params);
+  flann_index_->buildIndex();
+  return true;
+}
+
 }  // namespace kdtree

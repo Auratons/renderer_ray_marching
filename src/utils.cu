@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <limits>
 #include <ostream>
 #include <string>
 
@@ -9,13 +10,6 @@
 #include <thrust/device_vector.h>
 
 #include "utils.h"
-
-namespace glm {
-  std::ostream &operator<<(std::ostream &out, const glm::vec3 &v) {
-    out << v.x << " " << v.y << " " << v.z;
-    return out;
-  }
-}
 
 std::string glu_error_string(GLenum x) {
   char last_error_buffer[20];
@@ -142,6 +136,7 @@ thrust::device_vector<float> compute_radii(const thrust::device_vector<glm::vec4
   kdtree::KDTreeSearchParams params(2);
   auto tree = kdtree::KDTreeFlann();
   tree.Build(points);
+//  tree.Build((float*)thrust::raw_pointer_cast(vertices.data()), vertices.size());
   tree.Search(query, params, indices, distances);
 
 //  thrust::copy(distances.begin(), distances.end(), std::ostream_iterator<float>(std::cout, "\n"));
@@ -166,4 +161,36 @@ void FPSCounter::update() {
     ++lastTime;
     counter = 0;
   }
+}
+
+std::ostream &glm::operator<<(std::ostream &out, const glm::vec3 &v) {
+  out << v.x << " " << v.y << " " << v.z;
+  return out;
+}
+
+std::ostream &glm::operator<<(std::ostream &out, const glm::mat4 &m) {
+  std::ios out_state(nullptr);
+  out_state.copyfmt(out);
+  out << std::setprecision(std::numeric_limits<float>::digits10)
+      << std::fixed
+      <<  "[[ " << m[0][0] << ", " << m[1][0] << ", " << m[2][0] << ", " << m[3][0]
+      << " ][ " << m[0][1] << ", " << m[1][1] << ", " << m[2][1] << ", " << m[3][1]
+      << " ][ " << m[0][2] << ", " << m[1][2] << ", " << m[2][2] << ", " << m[3][2]
+      << " ][ " << m[0][3] << ", " << m[1][3] << ", " << m[2][3] << ", " << m[3][3] << " ]]";
+  out.copyfmt(out_state);
+  return out;
+}
+
+void glm::from_json(const nlohmann::json &j, glm::mat4 &P) {
+  // Create matrix from row-major to column-major
+  auto row0 = j[0].get<std::vector<float>>();
+  auto row1 = j[1].get<std::vector<float>>();
+  auto row2 = j[2].get<std::vector<float>>();
+  auto row3 = j[3].get<std::vector<float>>();
+  P = glm::mat4(
+    row0[0], row1[0], row2[0], row3[0],
+    row0[1], row1[1], row2[1], row3[1],
+    row0[2], row1[2], row2[2], row3[2],
+    row0[3], row1[3], row2[3], row3[3]
+  );
 }

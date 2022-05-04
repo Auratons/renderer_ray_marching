@@ -74,6 +74,13 @@ RUN export DIR=/tmp/cli11 \
  && rm -rf ${DIR} \
  && unset DIR
 
+RUN export DIR=/tmp/nlohmann \
+ && git clone --depth 1 --branch v3.10.5 https://github.com/nlohmann/json.git ${DIR} \
+ && cmake -S "${DIR}" -B "${DIR}/build" \
+ && cmake --build "${DIR}/build" --target install --config Debug -j $(nproc) \
+ && rm -rf ${DIR} \
+ && unset DIR
+
 ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
 
 COPY ./docker-entrypoint.sh /

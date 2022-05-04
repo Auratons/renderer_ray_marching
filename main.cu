@@ -2,15 +2,17 @@
 #include <exception>
 #include <iostream>
 #include <filesystem>
+#include <map>  // Even thought seems unused it's needed for nlohmann
 #include <string>
 
 #include "CLI/App.hpp"
-#include "CLI/Formatter.hpp"
-#include "CLI/Config.hpp"
+#include "CLI/Formatter.hpp"  // Even thought seems unused it's needed
+#include "CLI/Config.hpp"  // Even thought seems unused it's needed
 #include <cuda_runtime.h>
 #include <EGL/egl.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <nlohmann/json.hpp>
 #include <thrust/device_vector.h>
 
 #include "camera.h"
@@ -31,6 +33,7 @@ bool firstMouse = true;
 auto camera = Camera();
 
 using namespace std;
+using json = nlohmann::json;
 
 GLFWwindow* init_glfw();
 EGLDisplay  init_egl();
@@ -42,12 +45,14 @@ void        process_input(GLFWwindow *window);
 
 
 int main(int argc, char** argv) {
-  string pcd_path;
+  string pcd_path, matrix_path, output_path;
   bool headless;
-
   CLI::App args{"Pointcloud Renderer"};
-  args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
+  auto file = args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
+  args.add_option("-m,--matrices", matrix_path, "Path to view matrices json for which to render pointcloud in case of headless rendering.");
+  args.add_option("-o,--output_path", output_path, "Path where to store renders in case of headless rendering.");
   args.add_flag("-d,--headless", headless, "Run headlessly without a window");
+  file->required();
   CLI11_PARSE(args, argc, argv);
 
   auto [vertices_host, colors_host] = Pointcloud::load_ply(pcd_path);
@@ -85,10 +90,25 @@ int main(int argc, char** argv) {
     auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
     auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
 
+    camera.Zoom = 60.0f;
+
     if (headless) {
-      ray_marcher->render_to_texture(camera.GetViewMatrix(), glm::radians(camera.Zoom));
-      ray_marcher->save_png("test_image_egl.png");
-      quad.render(ray_marcher->get_texture().get_id());
+      if (!matrix_path.empty()) {
+        std::ifstream matrices{matrix_path};
+        if (matrices.good()) {
+          json j;
+          matrices >> j;
+          for (auto &[key, val]: j.at("train").items()) {
+            auto path = filesystem::path(key);
+            auto last_2_segments = *(--(--path.end())) / *(--path.end());
+            if (last_2_segments.string() != std::string("train/0071_color.png"))
+              continue;
+            auto view = val.get<glm::mat4>();
+            ray_marcher->render_to_texture(view, glm::radians(camera.Zoom));
+            ray_marcher->save_png("test_image_egl1.png");
+          }
+        }
+      }
     }
     else {
       FPSCounter fps;

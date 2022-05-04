@@ -20,6 +20,7 @@ public:
     KDTreeFlann &operator=(const KDTreeFlann &) = delete;
 
     bool Build(const thrust::device_vector<float> &pcd);
+    bool Build(float *pcd, size_t pcd_size);
     int Search(const thrust::device_vector<float> &query,
                const KDTreeSearchParams &param,
                thrust::device_vector<int> &indices,
