@@ -61,8 +61,8 @@ public:
 
   template<typename T>
   [[nodiscard]] auto get_texture_data() const {
-    auto raw_data = std::vector<T>(sizeof(T) * width * height);
-    glGetTexImage(GL_TEXTURE_2D, 0, format, type, raw_data.data());
+    auto raw_data = std::vector<T>(width * height);
+    glGetTexImage(GL_TEXTURE_2D, 0, format, type, (void*)raw_data.data());
     return raw_data;
   }
 };

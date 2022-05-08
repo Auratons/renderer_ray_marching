@@ -46,7 +46,7 @@ void        process_input(GLFWwindow *window);
 
 int main(int argc, char** argv) {
   string pcd_path, matrix_path, output_path;
-  bool headless;
+  bool headless = false;
   CLI::App args{"Pointcloud Renderer"};
   auto file = args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
   args.add_option("-m,--matrices", matrix_path, "Path to view matrices json for which to render pointcloud in case of headless rendering.");
@@ -130,7 +130,8 @@ int main(int argc, char** argv) {
       }
     }
   }
-  catch (const std::exception &) {
+  catch (const std::exception &e) {
+    cerr << e.what() << endl;
     successful_run = false;
   }
   if (!headless) glfwTerminate(); else eglTerminate(display);

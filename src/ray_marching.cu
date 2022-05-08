@@ -55,12 +55,16 @@ __global__ void render()
   }
   auto resolution = make_float2(SCREEN_WIDTH, SCREEN_HEIGHT);
   auto coordinates = make_float2((float)x, (float)y);
-  auto uv = (2.0f * coordinates - resolution) / resolution;
+  auto uv = (2.0f * coordinates - resolution);
   // In world coords
-  auto ro = make_float3( - VIEW[3]);
-  auto x_factor = glm::tan(FOV_RADIANS / 2);
-  auto rd = make_float3(glm::normalize(glm::transpose(glm::mat3(VIEW))[2] + glm::vec3(uv.x, uv.y, -2 * x_factor / SCREEN_WIDTH)));
+  auto camera_rot = glm::transpose(glm::mat3(VIEW));
+  auto camera_pos = - camera_rot * glm::vec3(VIEW[3]);
+  auto pane_dist = SCREEN_WIDTH / (2.0f * tanf(0.5f * FOV_RADIANS));
+  auto ro = make_float3(camera_pos);
+  auto rd = make_float3(glm::normalize(camera_rot * glm::vec3(uv.x, uv.y, -pane_dist)));
   auto color_index = ray_march(ro, rd);
+  // Great life-saving trick for debugging purposes when not writing to the whole picture. Leaving as a memento.
+  // auto finalColor = make_float4(x / (SCREEN_WIDTH-1), y / (SCREEN_HEIGHT-1), 1, 1);
   auto finalColor = BACKGROUND_COLOR;
   if (color_index >= 0) {
     finalColor = COLORS[color_index];
@@ -127,7 +131,7 @@ void PointcloudRayMarcher::render_to_texture(
   CHECK_ERROR_CUDA( cudaGraphicsSubResourceGetMappedArray(&cuda_image, cuda_image_resource_handle, 0, 0) );
   CHECK_ERROR_CUDA( cudaBindSurfaceToArray(surfaceWrite, cuda_image) );
   dim3 block_dim(32, 32, 1);
-  dim3 grid_dim(SCREEN_WIDTH / block_dim.x, SCREEN_HEIGHT / block_dim.y, 1);
+  dim3 grid_dim(ceil(SCREEN_WIDTH / block_dim.x), ceil(SCREEN_HEIGHT / block_dim.y), 1);
   render<<< grid_dim, block_dim >>>();
   CHECK_ERROR_CUDA();
   CHECK_ERROR_CUDA( cudaGraphicsUnmapResources(1, &cuda_image_resource_handle) );
@@ -135,13 +139,15 @@ void PointcloudRayMarcher::render_to_texture(
 }
 
 void PointcloudRayMarcher::save_png(const std::string &filename) {
-  auto raw_data = texture.get_texture_data<float>();
-  auto png = std::vector<unsigned char>(sizeof(float) * SCREEN_WIDTH * SCREEN_HEIGHT);
-  std::transform(raw_data.begin(), raw_data.end(), png.begin(), [](auto val){ return val * 255.0f; });
+  auto raw_data = texture.get_texture_data<float4>();
+  auto png = std::vector<unsigned char>(4 * SCREEN_WIDTH * SCREEN_HEIGHT);  // 4=RGBA
+  auto begin = (const float*)raw_data.data();
+  auto end = (const float*)(raw_data.data() + raw_data.size());
+  std::transform(begin, end, png.begin(), [](const float &val){ return (unsigned char)(val * 255.0f); });
   // OpenGL expects the 0.0 coordinate on the y-axis to be on the bottom side of the image, but images usually
   // have 0.0 at the top of the y-axis. For now, this unifies output with the visualisation on the screen.
   stbi_flip_vertically_on_write(true);
-  stbi_write_png(filename.c_str(), SCREEN_WIDTH, SCREEN_HEIGHT, 4, png.data(), 4 * SCREEN_WIDTH); // 4=RGBA
+  stbi_write_png(filename.c_str(), SCREEN_WIDTH, SCREEN_HEIGHT, 4, png.data(), 4 * SCREEN_WIDTH);  // 4=RGBA
 }
 
 /*
