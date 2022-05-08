@@ -25,12 +25,11 @@
 #include "utils.h"
 
 
-float lastX = SCREEN_WIDTH / 2.0f;
-float lastY = SCREEN_HEIGHT / 2.0f;
+glm::vec2 last_mouse_pos{SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f};
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
-bool firstMouse = true;
-auto camera = Camera();
+bool mouse_hold = false;
+auto camera = Camera(glm::vec3(0.0f, 0.0f, 3.0f));
 
 using namespace std;
 using json = nlohmann::json;
@@ -103,9 +102,9 @@ int main(int argc, char** argv) {
             auto last_2_segments = *(--(--path.end())) / *(--path.end());
             if (last_2_segments.string() != std::string("train/0071_color.png"))
               continue;
-            auto view = val.get<glm::mat4>();
-            ray_marcher->render_to_texture(view, glm::radians(camera.Zoom));
-            ray_marcher->save_png("test_image_egl1.png");
+            auto camera_pose = val.get<glm::mat4>();
+            ray_marcher->render_to_texture(glm::inverse(camera_pose), camera.Zoom);
+            ray_marcher->save_png("test_egl.png");
           }
         }
       }
@@ -119,7 +118,7 @@ int main(int argc, char** argv) {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        ray_marcher->render_to_texture(camera.GetViewMatrix(), glm::radians(camera.Zoom));
+        ray_marcher->render_to_texture(camera.GetViewMatrix(), camera.Zoom);
         quad.render(ray_marcher->get_texture().get_id());
 
         fps.update();
@@ -155,7 +154,9 @@ GLFWwindow* init_glfw() {
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
   glfwSetCursorPosCallback(window, mouse_callback);
   glfwSetScrollCallback(window, scroll_callback);
-//    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+  glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+  // Ensure we can capture the escape key being pressed
+  glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
   return window;
 }
 
@@ -218,26 +219,28 @@ void process_input(GLFWwindow *window) {
     camera.ProcessKeyboard(LEFT, deltaTime);
   if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
     camera.ProcessKeyboard(RIGHT, deltaTime);
+  if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+    camera.ProcessKeyboard(DOWN, deltaTime);
+  if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+    camera.ProcessKeyboard(UP, deltaTime);
 }
 
-void mouse_callback(GLFWwindow*, double xposIn, double yposIn) {
-  auto xpos = static_cast<float>(xposIn);
-  auto ypos = static_cast<float>(yposIn);
+void mouse_callback(GLFWwindow *window, double xposIn, double yposIn) {
+  if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+    glm::vec2 current_mouse_pos;
+    current_mouse_pos = glm::vec2(static_cast<float>(xposIn), static_cast<float>(yposIn));
+    if (!mouse_hold) {
+      last_mouse_pos = current_mouse_pos;
+      mouse_hold = true;
+    }
 
-  if (firstMouse)
-  {
-    lastX = xpos;
-    lastY = ypos;
-    firstMouse = false;
+    auto offset = current_mouse_pos - last_mouse_pos;
+    last_mouse_pos = current_mouse_pos;
+
+    camera.ProcessMouseMovement(offset.x, offset.y);
+  } else {
+    mouse_hold = false;
   }
-
-  float xoffset = xpos - lastX;
-  float yoffset = lastY - ypos; // reversed since y-coordinates go from bottom to top
-
-  lastX = xpos;
-  lastY = ypos;
-
-  camera.ProcessMouseMovement(xoffset, yoffset);
 }
 
 void scroll_callback(GLFWwindow*, double, double yoffset) {
