@@ -64,8 +64,6 @@ int print_invocations();
 
 thrust::device_vector<float> compute_radii(const thrust::device_vector<glm::vec4> &vertices);
 
-std::vector<bool> filter_view_frustrum(const glm::mat4 &view, const std::vector<glm::vec3> &pts, float ratio, float fov_rad);
-
 class FPSCounter {
 private:
   double lastTime = 0.0;

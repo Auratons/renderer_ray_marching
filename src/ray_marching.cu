@@ -19,9 +19,9 @@ __device__ const float4 *COLORS;
 __device__ const float  *RADII;
 __device__ size_t        POINTCLOUD_SIZE;
 
-__device__ float *FRUSTRUM_EDGE_PTS_WORLD_TMP;
-__device__ size_t FRUSTRUM_VERTICES_CNT;
-__device__ size_t *FRUSTRUM_VERTICES_IDX;
+__device__ float *FRUSTUM_EDGE_PTS_WORLD_CS;
+__device__ size_t FRUSTUM_VERTICES_CNT;
+__device__ size_t *FRUSTUM_VERTICES_IDX;
 
 GLuint TEXTURE_HANDLE;
 
@@ -55,7 +55,7 @@ __global__ void render()
   }
   auto resolution = make_float2(SCREEN_WIDTH, SCREEN_HEIGHT);
   auto coordinates = make_float2((float)x, (float)y);
-  auto uv = (2.0f * coordinates - resolution);
+  auto uv = (2.0f * coordinates - resolution) / 2.0f;
   // In world coords
   auto camera_rot = glm::transpose(glm::mat3(VIEW));
   auto camera_pos = - camera_rot * glm::vec3(VIEW[3]);
@@ -81,43 +81,47 @@ void PointcloudRayMarcher::render_to_texture(
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(VIEW, &view, sizeof(view)) );
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FOV_RADIANS, &fov_radians, sizeof(fov_radians)) );
 
-  // Generate homogeneous point for a frustrum-edge-lying point
+  // Generate homogeneous point for a frustum-edge-lying point
   auto v = [fov_radians] (float x, float y){
-    auto x_factor = glm::tan(fov_radians / 2);
-    return glm::vec3(x, y, -2 * x_factor / SCREEN_WIDTH);  // Camera looking to -z
+    return glm::vec3(
+      x * (0.5f * SCREEN_WIDTH),
+      y * (0.5f * SCREEN_HEIGHT),
+      -SCREEN_WIDTH / (2.0f * tanf(0.5f * fov_radians))
+    );
   };
-  // Due to computational cost, we're performing the test when moved to world origin.
-  auto cam_to_world_rot = glm::transpose(glm::mat3(view));
-  frustrum_edge_pts_world_tmp[0] = glm::vec4(cam_to_world_rot[2] + v(-1, -1), 1.0f);
-  frustrum_edge_pts_world_tmp[1] = glm::vec4(cam_to_world_rot[2] + v(1, -1), 1.0f);
-  frustrum_edge_pts_world_tmp[2] = glm::vec4(cam_to_world_rot[2] + v(1, 1), 1.0f);
-  frustrum_edge_pts_world_tmp[3] = glm::vec4(cam_to_world_rot[2] + v(-1, 1), 1.0f);
+  auto cam_rot = glm::transpose(glm::mat3(view));
+  auto cam_pos = - cam_rot * glm::vec3(view[3]);
+  frustum_edge_pts_world_cs[0] = glm::vec4(cam_rot * v(-1, -1), 1.0f);
+  frustum_edge_pts_world_cs[1] = glm::vec4(cam_rot * v(1, -1), 1.0f);
+  frustum_edge_pts_world_cs[2] = glm::vec4(cam_rot * v(1, 1), 1.0f);
+  frustum_edge_pts_world_cs[3] = glm::vec4(cam_rot * v(-1, 1), 1.0f);
 
-  frustrum_pcd_size = thrust::copy_if(
+  frustum_pcd_size = thrust::copy_if(
     thrust::counting_iterator<size_t>(0), thrust::counting_iterator<size_t>(vertices.size()),
     vertices.begin(),
-    frustrum_vertices_idx.begin(),
-    [cam_pos = -view[3], cam_dir = glm::vec4(cam_to_world_rot[2], 0)] __device__ (const glm::vec4 &vertex){
-      auto pt = vertex - cam_pos;
+    frustum_vertices_idx.begin(),
+    [cam_dir = -cam_rot[2], cam_pos, fep = reinterpret_cast<float *>(frustum_edge_pts_world_cs.data().get())] __device__ (const glm::vec4 &vertex){
+      auto pt = glm::vec3(vertex) - cam_pos;
       auto in = true;
-      // Frustrum
+      // frustum
       for (int i = 0; i < 4; ++i) {
         // Vector pairing {{0, 1}, {1, 2}, {2, 3}, {3, 0}}
-        auto v2 = FRUSTRUM_EDGE_PTS_WORLD_TMP + 4 * (i);
-        auto v1 = FRUSTRUM_EDGE_PTS_WORLD_TMP + 4 * ((i + 1) % 4);
+        auto v2 = fep + 4 * (i);
+        auto v1 = fep + 4 * ((i + 1) % 4);
         // Plane through origin, (v2 x v1) . pt
         in &= (((*(v2+1) * *(v1+2) - *(v2+2) * *(v1+1)) * pt.x +
                 (*(v2+2) * *v1     - *v2     * *(v1+2)) * pt.y +
-                (*v2     * *(v1+1) - *(v2+1) * *v1)     * pt.z) > 0);
+                (*v2     * *(v1+1) - *(v2+1) * *v1)     * pt.z) < 0);
       }
-      pt -= cam_dir * ZNEAR;
+      pt -= (cam_dir * ZNEAR);
       in &= (pt.x * cam_dir.x + pt.y * cam_dir.y + pt.z * cam_dir.z > 0);
-      pt -= cam_dir * (ZFAR - ZNEAR);
-      in &= (pt.x * - cam_dir.x + pt.y * - cam_dir.y + pt.z * - cam_dir.z > 0);
+      pt -= (cam_dir * (ZFAR - ZNEAR));
+      in &= (pt.x * -cam_dir.x + pt.y * -cam_dir.y + pt.z * -cam_dir.z > 0);
       return in;
     }
-  ) - frustrum_vertices_idx.begin();
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTRUM_VERTICES_CNT, &frustrum_pcd_size, sizeof(frustrum_pcd_size)) );
+  ) - frustum_vertices_idx.begin();
+
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTUM_VERTICES_CNT, &frustum_pcd_size, sizeof(frustum_pcd_size)) );
 
   CHECK_ERROR_CUDA(
     cudaGraphicsGLRegisterImage(
@@ -178,11 +182,11 @@ PointcloudRayMarcher::PointcloudRayMarcher(
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(RADII, &ptr_f, sizeof(ptr_f)) );
   auto pointcloud_size = vertices.size();
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(POINTCLOUD_SIZE, &pointcloud_size, sizeof(pointcloud_size)) );
-  auto ptr_v = reinterpret_cast<float *>(frustrum_edge_pts_world_tmp.data().get());
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTRUM_EDGE_PTS_WORLD_TMP, &ptr_v, sizeof(ptr_v)) );
-  frustrum_vertices_idx.resize(pointcloud_size);
-  auto ptr_s = frustrum_vertices_idx.data().get();
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTRUM_VERTICES_IDX, &ptr_s, sizeof(ptr_s)) );
+  auto ptr_v = reinterpret_cast<float *>(frustum_edge_pts_world_cs.data().get());
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTUM_EDGE_PTS_WORLD_CS, &ptr_v, sizeof(ptr_v)) );
+  frustum_vertices_idx.resize(pointcloud_size);
+  auto ptr_s = frustum_vertices_idx.data().get();
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTUM_VERTICES_IDX, &ptr_s, sizeof(ptr_s)) );
 }
 
 __device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir) {
@@ -208,8 +212,8 @@ __device__ RayHit distance_function(float3 pos) {
   float dist;
   RayHit hit;
   size_t index;
-  for (size_t i = 0; i < FRUSTRUM_VERTICES_CNT; ++i) {
-    index = FRUSTRUM_VERTICES_IDX[i];
+  for (size_t i = 0; i < FRUSTUM_VERTICES_CNT; ++i) {
+    index = FRUSTUM_VERTICES_IDX[i];
     dist = length(make_float3(VERTICES[index]) - pos) - RADII[index];
     if (dist < hit.distance) {
       hit.distance = dist;

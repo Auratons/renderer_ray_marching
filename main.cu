@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
     auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
     auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
 
-    camera.Zoom = 60.0f;
+    camera.Zoom = glm::radians(60.0f);
 
     if (headless) {
       if (!matrix_path.empty()) {

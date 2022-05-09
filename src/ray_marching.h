@@ -13,9 +13,9 @@ private:
     const thrust::device_vector<glm::vec4> vertices;
     const thrust::device_vector<glm::vec4> colors;
     const thrust::device_vector<float> radii;
-    thrust::device_vector<glm::vec4> frustrum_edge_pts_world_tmp = thrust::device_vector<glm::vec4>(4);
-    thrust::device_vector<size_t> frustrum_vertices_idx;
-    size_t frustrum_pcd_size = 0;
+    thrust::device_vector<glm::vec4> frustum_edge_pts_world_cs = thrust::device_vector<glm::vec4>(4);
+    thrust::device_vector<size_t> frustum_vertices_idx;
+    size_t frustum_pcd_size = 0;
     Texture2D texture;
 
 protected:
