@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <chrono>
 #include <exception>
 #include <iostream>
 #include <filesystem>
@@ -33,6 +34,7 @@ auto camera = Camera(glm::vec3(0.0f, 0.0f, 3.0f));
 
 using namespace std;
 using json = nlohmann::json;
+using namespace std::chrono;
 
 GLFWwindow* init_glfw();
 EGLDisplay  init_egl();
@@ -54,6 +56,7 @@ int main(int argc, char** argv) {
   file->required();
   CLI11_PARSE(args, argc, argv);
 
+  auto output = filesystem::path(output_path);
   auto [vertices_host, colors_host] = Pointcloud::load_ply(pcd_path);
   vertices_host.resize(10000);
   colors_host.resize(10000);
@@ -72,22 +75,7 @@ int main(int argc, char** argv) {
     if (headless) {
       display = init_egl();
       init_glad((GLADloadproc)eglGetProcAddress);
-    }
-    else {
-      window = init_glfw();
-      init_glad((GLADloadproc)glfwGetProcAddress);
-    }
 
-    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-    glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    auto shader_path_vertex = filesystem::current_path() / "shaders/vertex.glsl";
-    auto shader_path_fragment = filesystem::current_path() / "shaders/fragment.glsl";
-    auto shader_graphical = Shader({shader_path_vertex, shader_path_fragment}, {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER});
-    auto quad = Quad(shader_graphical);
-
-    if (headless) {
       if (!matrix_path.empty()) {
         std::ifstream matrices{matrix_path};
         if (matrices.good()) {
@@ -95,9 +83,12 @@ int main(int argc, char** argv) {
           matrices >> j;
           for (auto &[target_render_path, params]: j.at("train").items()) {
             auto path = filesystem::path(target_render_path);
-            auto last_2_segments = *(--(--path.end())) / *(--path.end());
-            if (last_2_segments.string() != std::string("train/0070_color.png"))
+            auto last_but_one_segment = *(--(--path.end()));
+            auto last_2_segments = last_but_one_segment / *(--path.end());
+            if (!((last_2_segments.string() == std::string("train/0070_color.png")) || (last_2_segments.string() == std::string("train/0030_color.png"))))
               continue;
+            if (!exists(output / last_but_one_segment))
+              filesystem::create_directory(output / last_but_one_segment);
             auto camera_pose = params.at("extrinsic_matrix").get<glm::mat4>();
             auto camera_matrix = params.at("intrinsic_matrix").get<glm::mat4>();
             auto image_width = 2.0f * camera_matrix[2][0];
@@ -108,13 +99,29 @@ int main(int argc, char** argv) {
 
             auto texture = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
             auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
+
+            auto start = high_resolution_clock::now();
             ray_marcher->render_to_texture(glm::inverse(camera_pose), fov_radians);
-            ray_marcher->save_png("test_egl.png");
+            ray_marcher->save_png((output / last_2_segments).c_str());
+            auto end = high_resolution_clock::now();
+            cout << canonical(absolute((output / last_but_one_segment))) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
           }
         }
       }
     }
     else {
+      window = init_glfw();
+      init_glad((GLADloadproc)glfwGetProcAddress);
+
+      glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+      glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+
+      auto shader_path_vertex = filesystem::current_path() / "shaders/vertex.glsl";
+      auto shader_path_fragment = filesystem::current_path() / "shaders/fragment.glsl";
+      auto shader_graphical = Shader({shader_path_vertex, shader_path_fragment}, {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER});
+      auto quad = Quad(shader_graphical);
+
       FPSCounter fps;
       camera.Zoom = glm::radians(60.0f);
       auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
