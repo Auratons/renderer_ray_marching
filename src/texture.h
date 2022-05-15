@@ -10,7 +10,6 @@
 class Texture2D {
 private:
   GLuint id;
-  GLsizei width, height;  // width and height of texture image
   const void *data;  // pointer to the image data in host memory
   GLint internal_format;  // format of texture object
   GLenum format;  // format of the pixel data
@@ -19,6 +18,8 @@ private:
   GLint min_filter;  // filtering mode if texture pixels < screen pixels
   GLint max_filter;  // filtering mode if texture pixels > screen pixels
   GLenum type;  // data type of the pixel data
+public:
+  const GLsizei width, height;  // width and height of texture image
 
 public:
   Texture2D(

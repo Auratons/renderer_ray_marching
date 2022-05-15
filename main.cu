@@ -86,10 +86,6 @@ int main(int argc, char** argv) {
     auto shader_path_fragment = filesystem::current_path() / "shaders/fragment.glsl";
     auto shader_graphical = Shader({shader_path_vertex, shader_path_fragment}, {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER});
     auto quad = Quad(shader_graphical);
-    auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-    auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
-
-    camera.Zoom = glm::radians(60.0f);
 
     if (headless) {
       if (!matrix_path.empty()) {
@@ -97,13 +93,22 @@ int main(int argc, char** argv) {
         if (matrices.good()) {
           json j;
           matrices >> j;
-          for (auto &[key, val]: j.at("train").items()) {
-            auto path = filesystem::path(key);
+          for (auto &[target_render_path, params]: j.at("train").items()) {
+            auto path = filesystem::path(target_render_path);
             auto last_2_segments = *(--(--path.end())) / *(--path.end());
-            if (last_2_segments.string() != std::string("train/0071_color.png"))
+            if (last_2_segments.string() != std::string("train/0070_color.png"))
               continue;
-            auto camera_pose = val.get<glm::mat4>();
-            ray_marcher->render_to_texture(glm::inverse(camera_pose), camera.Zoom);
+            auto camera_pose = params.at("extrinsic_matrix").get<glm::mat4>();
+            auto camera_matrix = params.at("intrinsic_matrix").get<glm::mat4>();
+            auto image_width = 2.0f * camera_matrix[2][0];
+            auto image_height = 2.0f * camera_matrix[2][1];
+            auto focal_length_pixels = camera_matrix[0][0];
+            assert(focal_length_pixels == camera_matrix[1][1]);
+            auto fov_radians = 2.0f * atanf(image_width / (2.0f * focal_length_pixels));
+
+            auto texture = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
+            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
+            ray_marcher->render_to_texture(glm::inverse(camera_pose), fov_radians);
             ray_marcher->save_png("test_egl.png");
           }
         }
@@ -111,6 +116,9 @@ int main(int argc, char** argv) {
     }
     else {
       FPSCounter fps;
+      camera.Zoom = glm::radians(60.0f);
+      auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
+      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
 
       // render loop
       while (!glfwWindowShouldClose(window)) {
@@ -171,9 +179,7 @@ EGLDisplay  init_egl() {
   };
 
   static const EGLint pbufferAttribs[] = {
-    EGL_WIDTH, (EGLint)SCREEN_WIDTH,
-    EGL_HEIGHT, (EGLint)SCREEN_HEIGHT,
-    EGL_NONE,
+    EGL_NONE
   };
   EGLDisplay eglDpy;
   // 1. Initialize EGL
