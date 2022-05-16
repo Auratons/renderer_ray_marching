@@ -127,6 +127,11 @@ std::ostream &glm::operator<<(std::ostream &out, const glm::vec3 &v) {
   return out;
 }
 
+std::ostream &glm::operator<<(std::ostream &out, const glm::vec4 &v) {
+  out << v.x << " " << v.y << " " << v.z << " " << v.w;
+  return out;
+}
+
 std::ostream &glm::operator<<(std::ostream &out, const glm::mat4 &m) {
   std::ios out_state(nullptr);
   out_state.copyfmt(out);

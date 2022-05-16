@@ -16,6 +16,7 @@
 #include <EGL/eglext.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <kdtree/kdtree_flann.h>
 #include <nlohmann/json.hpp>
 #include <thrust/device_vector.h>
 
@@ -61,14 +62,28 @@ int main(int argc, char** argv) {
 
   auto output = filesystem::path(output_path);
   auto [vertices_host, colors_host] = Pointcloud::load_ply(pcd_path);
-  vertices_host.resize(10000);
-  colors_host.resize(10000);
+//  vertices_host.resize(10000);
+//  colors_host.resize(10000);
   auto vertices = thrust::device_vector<glm::vec4>(vertices_host.begin(), vertices_host.end());
   auto colors = thrust::device_vector<glm::vec4>(colors_host.begin(), colors_host.end());
-  auto radii = compute_radii(vertices);
-  cout << "Min radius: " << *std::min_element(radii.begin(), radii.end()) << endl;
-  cout << "Max radius: " << *std::max_element(radii.begin(), radii.end()) << endl;
-  cout << "Avg radius: " << std::accumulate(radii.begin(), radii.end(), 0.0f) / (float)radii.size() << endl;
+
+  auto points = thrust::device_vector<float>(thrust::device_ptr<float>((float*)vertices.data().get()), thrust::device_ptr<float>((float*)vertices.data().get()) + 4 * vertices.size());
+  auto query = thrust::device_vector<float>(points.begin(), points.end());
+
+  thrust::device_vector<int> indices;
+  thrust::device_vector<float> radii;
+  kdtree::KDTreeSearchParams params(2);
+  auto tree = kdtree::KDTreeFlann();
+  tree.Build(points);
+  tree.Search(query, params, indices, radii);
+  for (size_t i = 1; i < indices.size(); i+=2) {
+    radii[i / 2] = std::sqrt(radii[i]);  // KD tree returns squared distance
+  }
+  radii.resize(radii.size() / 2);
+  cout << "Number of points: " << vertices.size() << endl;
+//  cout << "Min radius: " << *std::min_element(radii.begin(), radii.end()) << endl;
+//  cout << "Max radius: " << *std::max_element(radii.begin(), radii.end()) << endl;
+//  cout << "Avg radius: " << std::accumulate(radii.begin(), radii.end(), 0.0f) / (float)radii.size() << endl;
 
   GLFWwindow* window;
   EGLDisplay display;
@@ -112,7 +127,7 @@ int main(int argc, char** argv) {
             auto fov_radians = 2.0f * atanf(image_width / (2.0f * focal_length_pixels));
 
             auto texture = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
+            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
 
             auto start = high_resolution_clock::now();
             ray_marcher->render_to_texture(glm::inverse(camera_pose), fov_radians);
@@ -121,6 +136,7 @@ int main(int argc, char** argv) {
             cout << canonical(absolute(output_file_path)) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
 
             lock.unlock();
+            remove(lock_file_path);
           };
           for (auto &[target_render_path, params]: j.at("train").items()) {
             process(target_render_path, params);
@@ -147,7 +163,7 @@ int main(int argc, char** argv) {
       FPSCounter fps;
       camera.Zoom = glm::radians(60.0f);
       auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
+      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
 
       // render loop
       while (!glfwWindowShouldClose(window)) {

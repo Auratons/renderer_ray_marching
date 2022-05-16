@@ -11,6 +11,7 @@
 
 namespace glm {
   std::ostream &operator<<(std::ostream &out, const glm::vec3 &v);
+  std::ostream &operator<<(std::ostream &out, const glm::vec4 &v);
   std::ostream &operator<<(std::ostream &out, const glm::mat4 &m);
   void from_json(const nlohmann::json &j, glm::mat4 &P);
 }
