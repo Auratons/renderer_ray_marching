@@ -79,14 +79,13 @@ int main(int argc, char** argv) {
       if (!matrix_path.empty()) {
         std::ifstream matrices{matrix_path};
         if (matrices.good()) {
+          cout << "Matrices loaded." << endl;
           json j;
           matrices >> j;
-          for (auto &[target_render_path, params]: j.at("train").items()) {
+          auto process = [&](const string &target_render_path, const json &params) {
             auto path = filesystem::path(target_render_path);
             auto last_but_one_segment = *(--(--path.end()));
             auto last_2_segments = last_but_one_segment / *(--path.end());
-            if (!((last_2_segments.string() == std::string("train/0070_color.png")) || (last_2_segments.string() == std::string("train/0030_color.png"))))
-              continue;
             if (!exists(output / last_but_one_segment))
               filesystem::create_directory(output / last_but_one_segment);
             auto camera_pose = params.at("extrinsic_matrix").get<glm::mat4>();
@@ -104,7 +103,13 @@ int main(int argc, char** argv) {
             ray_marcher->render_to_texture(glm::inverse(camera_pose), fov_radians);
             ray_marcher->save_png((output / last_2_segments).c_str());
             auto end = high_resolution_clock::now();
-            cout << canonical(absolute((output / last_but_one_segment))) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
+            cout << canonical(absolute((output / last_2_segments))) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
+          };
+          for (auto &[target_render_path, params]: j.at("train").items()) {
+            process(target_render_path, params);
+          }
+          for (auto &[target_render_path, params]: j.at("val").items()) {
+            process(target_render_path, params);
           }
         }
       }

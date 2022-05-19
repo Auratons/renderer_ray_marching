@@ -140,7 +140,7 @@ struct SecondElementIsEven
 //! just for convenience: access a float4 by an index in [0,1,2]
 //! (casting it to a float* and accessing it by the index is way slower...)
 __host__ __device__
-float get_value_by_index( const float4& f, int i )
+inline float get_value_by_index( const float4& f, int i )
 {
     switch(i) {
     case 0:
@@ -393,7 +393,7 @@ struct pointxyz_to_px_py_pz
 } // namespace cuda
 
 
-std::ostream& operator <<(std::ostream& stream, const cuda::kd_tree_builder_detail::SplitInfo& s)
+inline std::ostream& operator <<(std::ostream& stream, const cuda::kd_tree_builder_detail::SplitInfo& s)
 {
     stream<<"(split l/r: "<< s.left <<" "<< s.right<< "  split:"<<s.split_dim<<" "<<s.split_val<<")";
     return stream;

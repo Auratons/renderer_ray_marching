@@ -1,4 +1,4 @@
-FROM nvidia/cudagl:11.4.2-devel-ubuntu20.04
+FROM nvidia/cudagl:11.2.2-devel-ubuntu20.04
 
 ARG CUDA_ARCH
 

@@ -40,7 +40,7 @@ struct RayHit {
 };
 
 __device__ RayHit distance_function(float3 pos);
-__device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir);
+__device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir, float dist_to_far_plane);
 
 template<typename T>
 __device__ float3 make_float3(const T &v) {
@@ -64,7 +64,8 @@ __global__ void render()
   auto pane_dist = (float)TEXTURE_WIDTH / (2.0f * tanf(0.5f * FOV_RADIANS));
   auto ro = make_float3(camera_pos);
   auto rd = make_float3(glm::normalize(camera_rot * glm::vec3(uv.x, uv.y, -pane_dist)));
-  auto color_index = ray_march(ro, rd);
+  auto dist_to_far_plane = ZFAR / dot(make_float3(-camera_rot[2]), rd);  // Both vectors are normalized
+  auto color_index = ray_march(ro, rd, dist_to_far_plane);
   // Great life-saving trick for debugging purposes when not writing to the whole picture. Leaving as a memento.
   // auto finalColor = make_float4(x / ((float)(TEXTURE_WIDTH-1)), y / ((float)(TEXTURE_HEIGHT-1)), 1, 1);
   auto finalColor = BACKGROUND_COLOR;
@@ -193,7 +194,7 @@ PointcloudRayMarcher::PointcloudRayMarcher(
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(TEXTURE_HEIGHT, &texture.height, sizeof(texture.height)) );
 }
 
-__device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir) {
+__device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir, float dist_to_far_plane) {
   float total_distance_travelled = 0.0f;
   float3 current_position;
   RayHit res;
@@ -205,7 +206,7 @@ __device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir) {
     if (res.distance < MIN_DIST) {
       return (long int)res.index;
     }
-    if (total_distance_travelled > ZFAR)
+    if (total_distance_travelled > dist_to_far_plane)
       break;
   }
 
