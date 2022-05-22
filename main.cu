@@ -6,11 +6,14 @@
 #include <map>  // Even thought seems unused it's needed for nlohmann
 #include <string>
 
+#include <boost/interprocess/sync/file_lock.hpp>
 #include "CLI/App.hpp"
 #include "CLI/Formatter.hpp"  // Even thought seems unused it's needed
 #include "CLI/Config.hpp"  // Even thought seems unused it's needed
 #include <cuda_runtime.h>
+#define EGL_EGLEXT_PROTOTYPES
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <nlohmann/json.hpp>
@@ -85,9 +88,21 @@ int main(int argc, char** argv) {
           auto process = [&](const string &target_render_path, const json &params) {
             auto path = filesystem::path(target_render_path);
             auto last_but_one_segment = *(--(--path.end()));
-            auto last_2_segments = last_but_one_segment / *(--path.end());
-            if (!exists(output / last_but_one_segment))
-              filesystem::create_directory(output / last_but_one_segment);
+            auto last_segment = *(--path.end());
+            auto output_file_path = output / last_but_one_segment / last_segment;
+            auto lock_file_path = output / last_but_one_segment / ("." + last_segment.string() + ".lock");
+            if (!exists(output / last_but_one_segment)) filesystem::create_directory(output / last_but_one_segment);
+            if (filesystem::exists(output_file_path)) {
+              cout << canonical(absolute(output_file_path)) << ": " << "ALREADY EXISTS" << endl;
+              return;
+            }
+            { ofstream{lock_file_path}; }
+            boost::interprocess::file_lock lock(lock_file_path.c_str());
+            if (!lock.try_lock()) {
+              cout << absolute(output_file_path) << ": " << "ALREADY LOCKED" << endl;
+              return;
+            }
+            cout << absolute(output_file_path) << ": " << "LOCKING" << endl;
             auto camera_pose = params.at("extrinsic_matrix").get<glm::mat4>();
             auto camera_matrix = params.at("intrinsic_matrix").get<glm::mat4>();
             auto image_width = 2.0f * camera_matrix[2][0];
@@ -101,9 +116,11 @@ int main(int argc, char** argv) {
 
             auto start = high_resolution_clock::now();
             ray_marcher->render_to_texture(glm::inverse(camera_pose), fov_radians);
-            ray_marcher->save_png((output / last_2_segments).c_str());
+            ray_marcher->save_png(output_file_path.c_str());
             auto end = high_resolution_clock::now();
-            cout << canonical(absolute((output / last_2_segments))) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
+            cout << canonical(absolute(output_file_path)) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
+
+            lock.unlock();
           };
           for (auto &[target_render_path, params]: j.at("train").items()) {
             process(target_render_path, params);
@@ -190,13 +207,46 @@ EGLDisplay  init_egl() {
     EGL_NONE
   };
 
-  static const EGLint pbufferAttribs[] = {
-    EGL_NONE
-  };
   EGLDisplay eglDpy;
+
   // 1. Initialize EGL
-  CHECK_ERROR_EGL(eglDpy = eglGetDisplay(EGL_DEFAULT_DISPLAY));
-  EGLint major, minor;
+  EGLint major, minor, assigned_gpu_idx = 0;
+
+  auto get_env = [](auto env_var_name) {
+    const char *tmp = getenv(env_var_name);
+    return string(tmp ? tmp : "");
+  };
+  auto slurm_step_gpus = get_env("SLURM_STEP_GPUS");  // Interactive Slurm job
+  auto slurm_job_gpus = get_env("SLURM_JOB_GPUS");  // Batch Slurm mode
+
+  // Running outside Slurm, not covering CUDA_VISIBLE_DEVICES
+  if (!slurm_job_gpus.empty() || !slurm_step_gpus.empty()) {
+    CHECK_ERROR_EGL(eglDpy = eglGetDisplay(EGL_DEFAULT_DISPLAY));
+  }
+  else {  // Running inside Slurm with or without cgroups
+    EGLint actualDeviceCount;
+    PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT;
+    PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT;
+
+    // Running inside Slurm with or without cgroups. If running outside Slurm (not covering CUDA_VISIBLE_DEVICES),
+    // assigned_gpu_idx is 0, casted properly below the same way as EGL_DEFAULT_DISPLAY is.
+    if (!slurm_job_gpus.empty() || !slurm_step_gpus.empty()) {
+      auto slurm_gpu = (slurm_step_gpus.empty()) ? slurm_job_gpus : slurm_step_gpus;
+      assigned_gpu_idx = stoi(slurm_gpu);
+    }
+    cout << "Using GPU " << assigned_gpu_idx << "." << endl;
+    CHECK_ERROR_EGL(eglQueryDevicesEXT = (PFNEGLQUERYDEVICESEXTPROC) eglGetProcAddress("eglQueryDevicesEXT"));
+    CHECK_ERROR_EGL(eglQueryDevicesEXT(0, nullptr, &actualDeviceCount));
+    EGLDeviceEXT actualEGLDevices[actualDeviceCount];
+    CHECK_ERROR_EGL(eglQueryDevicesEXT(actualDeviceCount, actualEGLDevices, &actualDeviceCount));
+    CHECK_ERROR_EGL(
+            eglGetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC) eglGetProcAddress("eglGetPlatformDisplayEXT")
+    );
+    CHECK_ERROR_EGL(
+      eglDpy = eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT, actualEGLDevices[assigned_gpu_idx], nullptr)
+    );
+  }
+
   CHECK_ERROR_EGL(eglInitialize(eglDpy, &major, &minor));
   // 2. Select an appropriate configuration
   EGLint numConfigs;
@@ -204,7 +254,7 @@ EGLDisplay  init_egl() {
   CHECK_ERROR_EGL(eglChooseConfig(eglDpy, configAttribs, &eglCfg, 1, &numConfigs));
   // 3. Create a surface
   EGLSurface eglSurf;
-  CHECK_ERROR_EGL(eglSurf = eglCreatePbufferSurface(eglDpy, eglCfg, pbufferAttribs));
+  CHECK_ERROR_EGL(eglSurf = eglCreatePbufferSurface(eglDpy, eglCfg, nullptr));
   // 4. Bind the API
   CHECK_ERROR_EGL(eglBindAPI(EGL_OPENGL_API));
   // 5. Create a context and make it current

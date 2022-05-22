@@ -35,6 +35,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         libxrender-dev \
         libglew-dev \
         libopenblas-dev \
+        libboost-all-dev \
         zsh \
         tmux 1> /dev/null \
  && apt-get clean \
@@ -53,7 +54,7 @@ RUN ( \
 RUN echo 'root:root_pass' | chpasswd
 
 # Install newer CMake
-RUN wget https://cmake.org/files/v3.19/cmake-3.19.8-Linux-x86_64.sh -q -O /tmp/cmake-install.sh \
+RUN wget https://cmake.org/files/v3.23/cmake-3.23.1-linux-x86_64.sh -q -O /tmp/cmake-install.sh \
  && sh /tmp/cmake-install.sh --skip-license --prefix=/usr/local/  \
  && rm /tmp/cmake-install.sh
 

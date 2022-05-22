@@ -23,6 +23,7 @@ find_package(CUDAToolkit REQUIRED)
 find_package(OpenGL REQUIRED COMPONENTS OpenGL EGL GLX)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(nlohmann_json 3.10 REQUIRED)
+find_package(Boost REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile_commands.json
 
@@ -51,6 +52,7 @@ target_link_libraries(${PROJECT_NAME}
   dl
   CUDA::toolkit
   nlohmann_json::nlohmann_json
+  Boost::boost  # Header-only target for interprocess.
 #  GLUT::GLUT
 #  X11
 #  Xrandr
@@ -69,6 +71,11 @@ target_compile_options(${PROJECT_NAME}
     $<$<AND:$<COMPILE_LANG_AND_ID:CXX,CUDA,GNU>,$<CONFIG:DEBUG>>:-Wall -Wextra -Wextra -Wunreachable-code -Wunused -Wunused-function -Wunused-label -Wunused-parameter -Wunused-value -Wunused-variable>
     $<$<AND:$<COMPILE_LANG_AND_ID:CXX,CUDA,GNU>,$<CONFIG:RELEASE>>:-O2>
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe --display_error_number,--diag_suppress="611,997,20012" --extended-lambda>
+)
+
+set_source_files_properties(include/stb_image_write.cpp
+    PROPERTIES
+      COMPILE_FLAGS "-w"  # Ignore warnings
 )
 
 configure_file(shaders/vertex.glsl shaders/vertex.glsl COPYONLY)
