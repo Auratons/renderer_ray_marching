@@ -35,8 +35,6 @@ __device__ float4 *QUERY;
 __device__ int KNN;
 
 __device__ float4 *FRUSTUM_EDGE_PTS_WORLD_CS;
-__device__ size_t  FRUSTUM_VERTICES_CNT;
-__device__ size_t *FRUSTUM_VERTICES_IDX;
 
 GLuint TEXTURE_HANDLE;
 
@@ -49,7 +47,7 @@ cudaArray_t                      cuda_image;
 
 struct RayHit {
     float distance = 1.0f / 0.0f;  // MAX_FLOAT
-    size_t index = 0;
+    int index = 0;
 };
 
 __device__ RayHit distance_function(float3 pos, int linearized_index);
@@ -115,33 +113,6 @@ void PointcloudRayMarcher::render_to_texture(
   frustum_edge_pts_world_cs[2] = glm::vec4(cam_rot * v(1, 1), 1.0f);
   frustum_edge_pts_world_cs[3] = glm::vec4(cam_rot * v(-1, 1), 1.0f);
 
-  frustum_pcd_size = thrust::copy_if(
-    thrust::counting_iterator<size_t>(0), thrust::counting_iterator<size_t>(vertices.size()),
-    vertices.begin(),
-    frustum_vertices_idx.begin(),
-    [cam_dir, cam_pos] __device__ (const glm::vec4 &vertex){
-      auto pt = make_float3(vertex) - cam_pos;
-      auto in = true;
-      // frustum
-      for (int i = 0; i < 4; ++i) {
-        // Vector pairing {{0, 1}, {1, 2}, {2, 3}, {3, 0}}
-        auto v2 = FRUSTUM_EDGE_PTS_WORLD_CS[i];
-        auto v1 = FRUSTUM_EDGE_PTS_WORLD_CS[(i + 1) % 4];
-        // Plane through origin, (v2 x v1) . pt
-        in &= (((v2.y * v1.z - v2.z * v1.y) * pt.x +
-                (v2.z * v1.x - v2.x * v1.z) * pt.y +
-                (v2.x * v1.y - v2.y * v1.x) * pt.z) < 0);
-      }
-      pt -= (cam_dir * ZNEAR);
-      in &= (pt.x * cam_dir.x + pt.y * cam_dir.y + pt.z * cam_dir.z > 0);
-      pt -= (cam_dir * (ZFAR - ZNEAR));
-      in &= (pt.x * -cam_dir.x + pt.y * -cam_dir.y + pt.z * -cam_dir.z > 0);
-      return in;
-    }
-  ) - frustum_vertices_idx.begin();
-
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTUM_VERTICES_CNT, &frustum_pcd_size, sizeof(frustum_pcd_size)) );
-
   CHECK_ERROR_CUDA(
     cudaGraphicsGLRegisterImage(
       &cuda_image_resource_handle,
@@ -205,13 +176,8 @@ PointcloudRayMarcher::PointcloudRayMarcher(
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(POINTCLOUD_SIZE, &pointcloud_size, sizeof(pointcloud_size)) );
   auto ptr_f4 = reinterpret_cast<float4 *>(frustum_edge_pts_world_cs.data().get());
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTUM_EDGE_PTS_WORLD_CS, &ptr_f4, sizeof(ptr_f4)) );
-  frustum_vertices_idx.resize(pointcloud_size);
-  auto ptr_s = frustum_vertices_idx.data().get();
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTUM_VERTICES_IDX, &ptr_s, sizeof(ptr_s)) );
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(TEXTURE_WIDTH, &texture.width, sizeof(texture.width)) );
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(TEXTURE_HEIGHT, &texture.height, sizeof(texture.height)) );
-//  auto p = tree.flann_index_.get();
-//  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(TREE, &p, sizeof(p)) );
   auto gpu_splits = thrust::raw_pointer_cast(&((*tree.flann_index_->gpu_helper_->gpu_splits_)[0]));
   auto gpu_child1 = thrust::raw_pointer_cast(&((*tree.flann_index_->gpu_helper_->gpu_child1_)[0]));
   auto gpu_parent = thrust::raw_pointer_cast(&((*tree.flann_index_->gpu_helper_->gpu_parent_)[0]));
@@ -258,10 +224,38 @@ __device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir, f
   return -1;
 }
 
+
+__device__ bool is_inside(const float4 &vertex) {
+    auto pt = make_float3(vertex) - CAMERA_POS;
+    auto in = true;
+    // frustum
+// From a mysterious reason, this doesn't work even though exactly the same code worked
+// as a lambda in thrust::copy_if in a previous version of the code. Fortunately, near
+// and far plane clipping works so back-cone-outliers are discarded. If we take sometimes
+// a frustum outlier near border planes of view frustum, we must take it. The speedup here
+// with KD tree in distance function is substantial over a simple for cycle through all
+// points inside.
+//    for (int i = 0; i < 4; ++i) {
+//      // Vector pairing {{0, 1}, {1, 2}, {2, 3}, {3, 0}}
+//      auto v2 = make_float3(FRUSTUM_EDGE_PTS_WORLD_CS[i]);
+//      auto v1 = make_float3(FRUSTUM_EDGE_PTS_WORLD_CS[(i + 1) % 4]);
+//      // Plane through origin, (v2 x v1) . pt
+//      in &= (((v2.y * v1.z - v2.z * v1.y) * pt.x +
+//              (v2.z * v1.x - v2.x * v1.z) * pt.y +
+//              (v2.x * v1.y - v2.y * v1.x) * pt.z) < 0);
+//      in &= (dot(cross(v2, v1), pt) < 0);
+//    }
+    pt -= (CAMERA_DIR * ZNEAR);
+    in &= (pt.x * CAMERA_DIR.x + pt.y * CAMERA_DIR.y + pt.z * CAMERA_DIR.z > 0);
+    pt -= (CAMERA_DIR * (ZFAR - ZNEAR));
+    in &= (pt.x * -CAMERA_DIR.x + pt.y * -CAMERA_DIR.y + pt.z * -CAMERA_DIR.z > 0);
+    return in;
+};
+
 __device__ RayHit distance_function(float3 pos, int linearized_index) {
   float dist;
   RayHit hit;
-  size_t index;
+  int index;
   auto start_of_threads_memory_offset = linearized_index * KNN;
 
   QUERY[linearized_index] = make_float4(pos, 0);
@@ -277,26 +271,6 @@ __device__ RayHit distance_function(float3 pos, int linearized_index) {
     INDICES + start_of_threads_memory_offset,
     DISTANCES + start_of_threads_memory_offset,
     KNN);
-
-  auto is_inside = [] __device__ (const float4 &vertex) {
-    auto pt = make_float3(vertex) - CAMERA_POS;
-    auto in = true;
-    // frustum
-//    for (int i = 0; i < 4; ++i) {
-//      // Vector pairing {{0, 1}, {1, 2}, {2, 3}, {3, 0}}
-//      auto v2 = FRUSTUM_EDGE_PTS_WORLD_CS[i];
-//      auto v1 = FRUSTUM_EDGE_PTS_WORLD_CS[(i + 1) % 4)];
-//      // Plane through origin, (v2 x v1) . pt
-//      in &= (((v2.y * v1.z - v2.z * v1.y) * pt.x +
-//              (v2.z * v1.x - v2.x * v1.z) * pt.y +
-//              (v2.x * v1.y - v2.y * v1.x) * pt.z) < 0);
-//    }
-    pt -= (CAMERA_DIR * ZNEAR);
-    in &= (pt.x * CAMERA_DIR.x + pt.y * CAMERA_DIR.y + pt.z * CAMERA_DIR.z > 0);
-    pt -= (CAMERA_DIR * (ZFAR - ZNEAR));
-    in &= (pt.x * -CAMERA_DIR.x + pt.y * -CAMERA_DIR.y + pt.z * -CAMERA_DIR.z > 0);
-    return in;
-  };
 
   for (int i = 0; i < KNN; ++i) {
     auto kth_nn_idx = start_of_threads_memory_offset + i;
