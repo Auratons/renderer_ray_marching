@@ -1,2 +1,2 @@
-# pointcloud_renderer
+# Pointcloud Renderer
 OpenGL-based ray marching pointcloud renderer
