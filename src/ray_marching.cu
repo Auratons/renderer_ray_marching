@@ -11,9 +11,7 @@
 #include <stb_image_write.h>
 #include <thrust/device_vector.h>
 
-__device__ glm::mat4     VIEW;
-__device__ float3        CAMERA_POS;
-__device__ float3        CAMERA_DIR;
+__device__ glm::mat4     CAMERA_MATRIX;
 __device__ float         FOV_RADIANS;
 __device__ const float4 *VERTICES;
 __device__ const float4 *COLORS;
@@ -51,7 +49,12 @@ struct RayHit {
 };
 
 __device__ RayHit distance_function(float3 pos, int linearized_index);
-__device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir, float dist_to_far_plane, int linearized_index);
+__device__ long int ray_march(
+    const float3 &ray_origin,
+    const float3 &ray_dir,
+    float dist_to_far_plane,
+    float dist_to_near_plane,
+    int linearized_index);
 
 template<typename T>
 __device__ __host__ float3 make_float3(const T &v) {
@@ -70,13 +73,13 @@ __global__ void render()
   auto coordinates = make_float2((float)x, (float)y);
   auto uv = (2.0f * coordinates - resolution) / 2.0f;
   // In world coords
-  auto camera_rot = glm::transpose(glm::mat3(VIEW));
-  auto camera_pos = - camera_rot * glm::vec3(VIEW[3]);
   auto pane_dist = (float)TEXTURE_WIDTH / (2.0f * tanf(0.5f * FOV_RADIANS));
-  auto ro = make_float3(camera_pos);
-  auto rd = make_float3(glm::normalize(camera_rot * glm::vec3(uv.x, uv.y, -pane_dist)));
-  auto dist_to_far_plane = ZFAR / dot(make_float3(-camera_rot[2]), rd);  // Both vectors are normalized
-  auto color_index = ray_march(ro, rd, dist_to_far_plane, y * TEXTURE_WIDTH + x);
+  auto cam_dir = make_float3(- CAMERA_MATRIX[2]);
+  auto ray_origin = make_float3(CAMERA_MATRIX[3]); // camera position
+  auto ray_direction = make_float3(glm::normalize(CAMERA_MATRIX * glm::vec4(uv.x, uv.y, -pane_dist, 0.0f)));
+  auto dist_to_far_plane = ZFAR / dot(cam_dir, ray_direction);  // Both vectors are normalized
+  auto dist_to_near_plane = ZNEAR / dot(cam_dir, ray_direction);  // Both vectors are normalized
+  auto color_index = ray_march(ray_origin, ray_direction, dist_to_far_plane, dist_to_near_plane, y * TEXTURE_WIDTH + x);
   // Great life-saving trick for debugging purposes when not writing to the whole picture. Leaving as a memento.
   // auto finalColor = make_float4(x / ((float)(TEXTURE_WIDTH-1)), y / ((float)(TEXTURE_HEIGHT-1)), 1, 1);
   auto finalColor = BACKGROUND_COLOR;
@@ -90,28 +93,24 @@ __global__ void render()
 }
 
 void PointcloudRayMarcher::render_to_texture(
-  const glm::mat4 &view,
+  const glm::mat4 &camera_matrix,
   float fov_radians) {
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(VIEW, &view, sizeof(view)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(CAMERA_MATRIX, &camera_matrix, sizeof(camera_matrix)) );
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FOV_RADIANS, &fov_radians, sizeof(fov_radians)) );
 
   // Generate homogeneous point for a frustum-edge-lying point
   auto v = [&] (float x, float y){
-    return glm::vec3(
+    return glm::vec4(
       x * (0.5f * (float)texture.width),
       y * (0.5f * (float)texture.height),
-      -(float)texture.width / (2.0f * tanf(0.5f * fov_radians))
+      -(float)texture.width / (2.0f * tanf(0.5f * fov_radians)),
+      0.0f
     );
   };
-  auto cam_rot = glm::transpose(glm::mat3(view));
-  auto cam_pos = make_float3(- cam_rot * glm::vec3(view[3]));
-  auto cam_dir = make_float3(- cam_rot[2]);
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(CAMERA_DIR, &cam_dir, sizeof(cam_dir)) );
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(CAMERA_POS, &cam_pos, sizeof(cam_pos)) );
-  frustum_edge_pts_world_cs[0] = glm::vec4(cam_rot * v(-1, -1), 1.0f);
-  frustum_edge_pts_world_cs[1] = glm::vec4(cam_rot * v(1, -1), 1.0f);
-  frustum_edge_pts_world_cs[2] = glm::vec4(cam_rot * v(1, 1), 1.0f);
-  frustum_edge_pts_world_cs[3] = glm::vec4(cam_rot * v(-1, 1), 1.0f);
+  frustum_edge_pts_world_cs[0] = camera_matrix * v(-1, -1);
+  frustum_edge_pts_world_cs[1] = camera_matrix * v(1, -1);
+  frustum_edge_pts_world_cs[2] = camera_matrix * v(1, 1);
+  frustum_edge_pts_world_cs[3] = camera_matrix * v(-1, 1);
 
   CHECK_ERROR_CUDA(
     cudaGraphicsGLRegisterImage(
@@ -205,7 +204,12 @@ PointcloudRayMarcher::PointcloudRayMarcher(
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(KNN, &knn, sizeof(knn)) );
 }
 
-__device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir, float dist_to_far_plane, int linearized_index) {
+__device__ long int ray_march(
+    const float3 &ray_origin,
+    const float3 &ray_dir,
+    float dist_to_far_plane,
+    float dist_to_near_plane,
+    int linearized_index) {
   float total_distance_travelled = 0.0f;
   float3 current_position;
   RayHit res;
@@ -215,6 +219,8 @@ __device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir, f
     res = distance_function(current_position, linearized_index);
     total_distance_travelled += res.distance;
     if (res.distance < MIN_DIST) {
+      if (total_distance_travelled < dist_to_near_plane)
+        continue;
       return (long int)res.index;
     }
     if (total_distance_travelled > dist_to_far_plane)
@@ -226,7 +232,9 @@ __device__ long int ray_march(const float3 &ray_origin, const float3 &ray_dir, f
 
 
 __device__ bool is_inside(const float4 &vertex) {
-    auto pt = make_float3(vertex) - CAMERA_POS;
+    auto cam_pos = make_float3(CAMERA_MATRIX[3]);
+    auto cam_dir = make_float3(- CAMERA_MATRIX[2]);
+    auto pt = make_float3(vertex) - cam_pos;
     auto in = true;
     // frustum
 // From a mysterious reason, this doesn't work even though exactly the same code worked
@@ -245,10 +253,10 @@ __device__ bool is_inside(const float4 &vertex) {
 //              (v2.x * v1.y - v2.y * v1.x) * pt.z) < 0);
 //      in &= (dot(cross(v2, v1), pt) < 0);
 //    }
-    pt -= (CAMERA_DIR * ZNEAR);
-    in &= (pt.x * CAMERA_DIR.x + pt.y * CAMERA_DIR.y + pt.z * CAMERA_DIR.z > 0);
-    pt -= (CAMERA_DIR * (ZFAR - ZNEAR));
-    in &= (pt.x * -CAMERA_DIR.x + pt.y * -CAMERA_DIR.y + pt.z * -CAMERA_DIR.z > 0);
+    pt -= (cam_dir * ZNEAR);
+    in &= (pt.x * cam_dir.x + pt.y * cam_dir.y + pt.z * cam_dir.z > 0);
+    pt -= (cam_dir * (ZFAR - ZNEAR));
+    in &= (pt.x * -cam_dir.x + pt.y * -cam_dir.y + pt.z * -cam_dir.z > 0);
     return in;
 };
 

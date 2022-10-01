@@ -3,7 +3,6 @@
 
 #include <vector>
 
-#include <EGL/egl.h>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
@@ -21,8 +20,7 @@ namespace glm {
 // https://github.com/gustafsson/freq/blob/master/lib/gpumisc/gluerrorstring.h
 std::string glu_error_string(GLenum);
 
-// Supports all error codes listed here: https://www.khronos.org/registry/EGL/sdk/docs/man/html/eglGetError.xhtml
-std::string egl_error_string(EGLint);
+void        init_glad(GLADloadproc pointer);
 
 
 #define CHECK_ERROR_CUDA(EXPRESSION) { \
@@ -39,15 +37,6 @@ std::string egl_error_string(EGLint);
   GLenum err = glGetError(); \
   if(err != GL_NO_ERROR) { \
     std::cerr << "GL ERROR: " __FILE__ << " " << __LINE__ << " " << glu_error_string(err) << std::endl; \
-    exit(1); \
-  } \
-}
-
-#define CHECK_ERROR_EGL(EXPRESSION) { \
-  EXPRESSION; \
-  EGLint err = eglGetError(); \
-  if(err != EGL_SUCCESS) { \
-    std::cerr << "EGL ERROR: " __FILE__ << " " << __LINE__ << " " << egl_error_string(err) << std::endl; \
     exit(1); \
   } \
 }

@@ -23,19 +23,25 @@ find_package(CUDAToolkit REQUIRED)
 find_package(OpenGL REQUIRED COMPONENTS OpenGL EGL GLX)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(nlohmann_json 3.10 REQUIRED)
-find_package(Boost REQUIRED)
+find_package(Boost REQUIRED system serialization)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile_commands.json
 
 add_executable(${PROJECT_NAME}
   main.cu
-  src/shader.cpp
+  src/egl.cpp
   src/quad.cpp
-  src/texture.cpp
   src/pointcloud.cpp
-  src/utils.cu
   src/ray_marching.cu
+  src/shader.cpp
+  src/texture.cpp
+  src/utils.cu
   include/stb_image_write.cpp
+)
+
+target_include_directories(${PROJECT_NAME}
+  PRIVATE
+    ${Boost_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -53,6 +59,7 @@ target_link_libraries(${PROJECT_NAME}
   CUDA::toolkit
   nlohmann_json::nlohmann_json
   Boost::boost  # Header-only target for interprocess.
+  ${Boost_LIBRARIES}
 #  GLUT::GLUT
 #  X11
 #  Xrandr
