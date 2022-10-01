@@ -140,8 +140,7 @@ struct SecondElementIsEven
 //! just for convenience: access a float4 by an index in [0,1,2]
 //! (casting it to a float* and accessing it by the index is way slower...)
 __host__ __device__
-inline float get_value_by_index( const float4& f, int i )
-{
+inline float get_value_by_index( const float4& f, int i ) {
     switch(i) {
     case 0:
         return f.x;

@@ -155,41 +155,6 @@ void nearestKernel(const cuda::kd_tree_builder_detail::SplitInfo* splits,
 
 }
 
-//! contains some pointers that use cuda data types and that cannot be easily
-//! forward-declared.
-//! basically it contains all GPU buffers
-template<typename Distance>
-struct KDTreeCuda3dIndex<Distance>::GpuHelper
-{
-    thrust::device_vector< cuda::kd_tree_builder_detail::SplitInfo >* gpu_splits_;
-    thrust::device_vector< int >* gpu_parent_;
-    thrust::device_vector< int >* gpu_child1_;
-    thrust::device_vector< float4 >* gpu_aabb_min_;
-    thrust::device_vector< float4 >* gpu_aabb_max_;
-    thrust::device_vector<float4>* gpu_points_;
-    thrust::device_vector<int>* gpu_vind_;
-    GpuHelper() :  gpu_splits_(0), gpu_parent_(0), gpu_child1_(0), gpu_aabb_min_(0), gpu_aabb_max_(0), gpu_points_(0), gpu_vind_(0){
-    }
-    ~GpuHelper()
-    {
-        delete gpu_splits_;
-        gpu_splits_=0;
-        delete gpu_parent_;
-        gpu_parent_=0;
-        delete gpu_child1_;
-        gpu_child1_=0;
-        delete gpu_aabb_max_;
-        gpu_aabb_max_=0;
-        delete gpu_aabb_min_;
-        gpu_aabb_min_=0;
-        delete gpu_vind_;
-        gpu_vind_=0;
-
-        delete gpu_points_;
-        gpu_points_=0;
-    }
-};
-
 //! thrust transform functor
 //! transforms indices in the internal data set back to the original indices
 struct map_indices
@@ -272,6 +237,26 @@ struct GpuDistance< L1<float> >
     typedef CudaL1 type;
 };
 
+template<typename Distance>
+__device__ void KDTreeCuda3dIndex<Distance>::knnSearchOneQuery(
+    const cuda::kd_tree_builder_detail::SplitInfo *splits,
+    const int *child1,
+    const int *parent,
+    const float4 *aabbMin,
+    const float4 *aabbMax,
+    const float4 *elements,
+    const float4 &query,
+    int *indices,
+    float *dists,
+    int knn) {
+  typename GpuDistance<Distance>::type dist;
+  size_t tid = 0;
+
+  auto result = flann::cuda::KnnResultSet<float, false>(knn, true, 1);
+  result.setResultLocation( dists, indices, tid, knn );
+  KdTreeCudaPrivate::searchNeighbors(splits,child1,parent,aabbMin,aabbMax,elements, query, result, dist);
+  result.finish();
+}
 
 template< typename Distance >
 void KDTreeCuda3dIndex<Distance>::knnSearchGpu(const Matrix<ElementType>& queries, Matrix<int>& indices, Matrix<DistanceType>& dists, size_t knn, const SearchParams& params) const
@@ -619,6 +604,19 @@ struct KDTreeCuda3dIndex<flann::L2<float> >::GpuHelper;
 
 template
 void KDTreeCuda3dIndex<flann::L2<float> >::knnSearchGpu(const Matrix<ElementType>& queries, Matrix<int>& indices, Matrix<DistanceType>& dists, size_t knn, const SearchParams& params) const;
+
+template
+__device__ void KDTreeCuda3dIndex<flann::L2<float> >::knnSearchOneQuery(
+  const cuda::kd_tree_builder_detail::SplitInfo *splits,
+  const int *child1,
+  const int *parent,
+  const float4 *aabbMin,
+  const float4 *aabbMax,
+  const float4 *elements,
+  const float4 &query,
+  int *indices,
+  float *dists,
+  int knn);
 
 template
 int KDTreeCuda3dIndex< flann::L2<float> >::radiusSearchGpu(const Matrix<ElementType>& queries, Matrix<int>& indices, Matrix<DistanceType>& dists, float radius, const SearchParams& params) const;
