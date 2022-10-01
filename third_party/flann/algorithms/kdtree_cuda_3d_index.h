@@ -42,6 +42,7 @@
 #include "flann/util/result_set.h"
 #include "flann/util/heap.h"
 #include "flann/util/allocator.h"
+#include <flann/algorithms/kdtree_cuda_builder.h>
 #include "flann/util/random.h"
 #include "flann/util/saving.h"
 #include "flann/util/params.h"
@@ -186,6 +187,18 @@ public:
         return knn*queries.rows; // hack...
     }
 
+    __device__ static void knnSearchOneQuery(
+      const cuda::kd_tree_builder_detail::SplitInfo *splits,
+      const int *child1,
+      const int *parent,
+      const float4 *aabbMin,
+      const float4 *aabbMax,
+      const float4 *elements,
+      const float4 &query,
+      int *indices,
+      float *dists,
+      int knn);
+
     /**
      * \brief Perform k-nearest neighbor search
      * \param[in] queries The query points for which to find the nearest neighbors
@@ -236,11 +249,11 @@ private:
 
 
 
-private:
-
+public:
     struct GpuHelper;
 
     GpuHelper* gpu_helper_;
+private:
 
     const Matrix<ElementType> dataset_;
 
@@ -264,7 +277,39 @@ private:
     USING_BASECLASS_SYMBOLS
 };   // class KDTreeCuda3dIndex
 
-
+  //! contains some pointers that use cuda data types and that cannot be easily
+  //! forward-declared.
+  //! basically it contains all GPU buffers
+  template<typename Distance>
+  struct KDTreeCuda3dIndex<Distance>::GpuHelper
+  {
+      thrust::device_vector< cuda::kd_tree_builder_detail::SplitInfo >* gpu_splits_;
+      thrust::device_vector< int >* gpu_parent_;
+      thrust::device_vector< int >* gpu_child1_;
+      thrust::device_vector< float4 >* gpu_aabb_min_;
+      thrust::device_vector< float4 >* gpu_aabb_max_;
+      thrust::device_vector<float4>* gpu_points_;
+      thrust::device_vector<int>* gpu_vind_;
+      GpuHelper() :  gpu_splits_(0), gpu_parent_(0), gpu_child1_(0), gpu_aabb_min_(0), gpu_aabb_max_(0), gpu_points_(0), gpu_vind_(0){
+      }
+      ~GpuHelper()
+      {
+        delete gpu_splits_;
+        gpu_splits_=0;
+        delete gpu_parent_;
+        gpu_parent_=0;
+        delete gpu_child1_;
+        gpu_child1_=0;
+        delete gpu_aabb_max_;
+        gpu_aabb_max_=0;
+        delete gpu_aabb_min_;
+        gpu_aabb_min_=0;
+        delete gpu_vind_;
+        gpu_vind_=0;
+        delete gpu_points_;
+        gpu_points_=0;
+      }
+  };
 }
 
 #endif //FLANN_KDTREE_SINGLE_INDEX_H_

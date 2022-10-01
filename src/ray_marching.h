@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 #include <glm/glm.hpp>
+#include <kdtree/kdtree_flann.h>
 #include <thrust/device_vector.h>
 
 #include "texture.h"
@@ -13,17 +14,23 @@ private:
     const thrust::device_vector<glm::vec4> vertices;
     const thrust::device_vector<glm::vec4> colors;
     const thrust::device_vector<float> radii;
+    const int knn = 10;
     thrust::device_vector<glm::vec4> frustum_edge_pts_world_cs = thrust::device_vector<glm::vec4>(4);
     thrust::device_vector<size_t> frustum_vertices_idx;
     size_t frustum_pcd_size = 0;
     Texture2D texture;
+    const kdtree::KDTreeFlann &tree;
+    thrust::device_vector<int> indices;
+    thrust::device_vector<float> distances;
+    thrust::device_vector<float4> query;
 
 protected:
   PointcloudRayMarcher(
     const thrust::device_vector<glm::vec4> &vertices,
     const thrust::device_vector<glm::vec4> &colors,
     const thrust::device_vector<float> &radii,
-    const Texture2D &texture
+    const Texture2D &texture,
+    const kdtree::KDTreeFlann &tree
   );
 
 public:
@@ -34,7 +41,8 @@ public:
     const thrust::device_vector<glm::vec4> &vertices,
     const thrust::device_vector<glm::vec4> &colors,
     const thrust::device_vector<float> &radii,
-    const Texture2D &texture);
+    const Texture2D &texture,
+    const kdtree::KDTreeFlann &tree);
 
   void render_to_texture(const glm::mat4 &view, float fov_radians);
 

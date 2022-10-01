@@ -28,7 +28,6 @@ public:
 //    std::tuple<thrust::device_vector<float>, thrust::device_vector<float>> SearchTorch(const thrust::device_vector<float> &query,
 //                                                         const KDTreeSearchParams &param) const;
 
-protected:
     int SearchKNN(const thrust::device_vector<float> &query,
                   int knn,
                   thrust::device_vector<int> &indices,

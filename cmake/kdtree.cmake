@@ -22,6 +22,7 @@ target_compile_options(KDTREE
   PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>  # allows calling constexpr host functions from device code
     $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>  # allows __device__ annotations in lambda functions
+    $<$<COMPILE_LANGUAGE:CUDA>:--relocatable-device-code=true --compile>
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe --display_error_number,--diag_suppress="611,997,68">  # Disable warnings from the library
   PUBLIC
     -DFLANN_USE_CUDA

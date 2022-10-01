@@ -7,20 +7,21 @@
 #include <string>
 
 #include <boost/interprocess/sync/file_lock.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/serialization/vector.hpp>
 #include "CLI/App.hpp"
 #include "CLI/Formatter.hpp"  // Even thought seems unused it's needed
 #include "CLI/Config.hpp"  // Even thought seems unused it's needed
 #include <cuda_runtime.h>
-#define EGL_EGLEXT_PROTOTYPES
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <kdtree/kdtree_flann.h>
 #include <nlohmann/json.hpp>
 #include <thrust/device_vector.h>
 
 #include "camera.h"
 #include "common.h"
+#include "egl.hpp"
 #include "pointcloud.h"
 #include "quad.h"
 #include "ray_marching.h"
@@ -40,8 +41,6 @@ using json = nlohmann::json;
 using namespace std::chrono;
 
 GLFWwindow* init_glfw();
-EGLDisplay  init_egl();
-void        init_glad(GLADloadproc pointer);
 void        framebuffer_size_callback(GLFWwindow *, int width, int height);
 void        mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void        scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
@@ -61,14 +60,35 @@ int main(int argc, char** argv) {
 
   auto output = filesystem::path(output_path);
   auto [vertices_host, colors_host] = Pointcloud::load_ply(pcd_path);
-  vertices_host.resize(10000);
-  colors_host.resize(10000);
+//  vertices_host.resize(10000);
+//  colors_host.resize(10000);
   auto vertices = thrust::device_vector<glm::vec4>(vertices_host.begin(), vertices_host.end());
   auto colors = thrust::device_vector<glm::vec4>(colors_host.begin(), colors_host.end());
-  auto radii = compute_radii(vertices);
-  cout << "Min radius: " << *std::min_element(radii.begin(), radii.end()) << endl;
-  cout << "Max radius: " << *std::max_element(radii.begin(), radii.end()) << endl;
-  cout << "Avg radius: " << std::accumulate(radii.begin(), radii.end(), 0.0f) / (float)radii.size() << endl;
+
+  auto points = thrust::device_vector<float>(thrust::device_ptr<float>((float*)vertices.data().get()), thrust::device_ptr<float>((float*)vertices.data().get()) + 4 * vertices.size());
+  auto query = thrust::device_vector<float>(points.begin(), points.end());
+
+  thrust::device_vector<int> indices;
+  thrust::device_vector<float> radii;
+  kdtree::KDTreeSearchParams params(2);
+  auto tree = kdtree::KDTreeFlann();
+  tree.Build(points);
+  tree.Search(query, params, indices, radii);
+  for (size_t i = 1; i < indices.size(); i+=2) {
+    radii[i / 2] = std::sqrt(radii[i]);  // KD tree returns squared distance
+  }
+  radii.resize(radii.size() / 2);
+  cout << "Number of points: " << vertices.size() << endl;
+//  cout << "Min radius: " << *std::min_element(radii.begin(), radii.end()) << endl;
+//  cout << "Max radius: " << *std::max_element(radii.begin(), radii.end()) << endl;
+//  cout << "Avg radius: " << std::accumulate(radii.begin(), radii.end(), 0.0f) / (float)radii.size() << endl;
+
+  vector<float> radii_host(radii.begin(), radii.end());
+  cout << "Number of radii: " << radii_host.size() << endl;
+  std::ofstream ofs(pcd_path + ".kdtree.radii");
+  boost::archive::text_oarchive oa(ofs);
+  oa & radii_host;
+  ofs.close();
 
   GLFWwindow* window;
   EGLDisplay display;
@@ -91,6 +111,7 @@ int main(int argc, char** argv) {
             auto last_segment = *(--path.end());
             auto output_file_path = output / last_but_one_segment / last_segment;
             auto lock_file_path = output / last_but_one_segment / ("." + last_segment.string() + ".lock");
+            if (!exists(output)) std::filesystem::create_directory(output);
             if (!exists(output / last_but_one_segment)) filesystem::create_directory(output / last_but_one_segment);
             if (filesystem::exists(output_file_path)) {
               cout << canonical(absolute(output_file_path)) << ": " << "ALREADY EXISTS" << endl;
@@ -112,15 +133,16 @@ int main(int argc, char** argv) {
             auto fov_radians = 2.0f * atanf(image_width / (2.0f * focal_length_pixels));
 
             auto texture = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
+            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
 
             auto start = high_resolution_clock::now();
-            ray_marcher->render_to_texture(glm::inverse(camera_pose), fov_radians);
-            ray_marcher->save_png(output_file_path.c_str());
+            ray_marcher->render_to_texture(camera_pose, fov_radians);
             auto end = high_resolution_clock::now();
+            ray_marcher->save_png(output_file_path.c_str());
             cout << canonical(absolute(output_file_path)) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
 
             lock.unlock();
+            remove(lock_file_path);
           };
           for (auto &[target_render_path, params]: j.at("train").items()) {
             process(target_render_path, params);
@@ -147,7 +169,7 @@ int main(int argc, char** argv) {
       FPSCounter fps;
       camera.Zoom = glm::radians(60.0f);
       auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture);
+      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
 
       // render loop
       while (!glfwWindowShouldClose(window)) {
@@ -195,80 +217,6 @@ GLFWwindow* init_glfw() {
   // Ensure we can capture the escape key being pressed
   glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
   return window;
-}
-
-EGLDisplay  init_egl() {
-  static const EGLint configAttribs[] = {
-    EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-    EGL_BLUE_SIZE, 8,
-    EGL_GREEN_SIZE, 8,
-    EGL_RED_SIZE, 8,
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-    EGL_NONE
-  };
-
-  EGLDisplay eglDpy;
-
-  // 1. Initialize EGL
-  EGLint major, minor, assigned_gpu_idx = 0;
-
-  auto get_env = [](auto env_var_name) {
-    const char *tmp = getenv(env_var_name);
-    return string(tmp ? tmp : "");
-  };
-  auto slurm_step_gpus = get_env("SLURM_STEP_GPUS");  // Interactive Slurm job
-  auto slurm_job_gpus = get_env("SLURM_JOB_GPUS");  // Batch Slurm mode
-
-  // Running outside Slurm, not covering CUDA_VISIBLE_DEVICES
-  if (!slurm_job_gpus.empty() || !slurm_step_gpus.empty()) {
-    CHECK_ERROR_EGL(eglDpy = eglGetDisplay(EGL_DEFAULT_DISPLAY));
-  }
-  else {  // Running inside Slurm with or without cgroups
-    EGLint actualDeviceCount;
-    PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT;
-    PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT;
-
-    // Running inside Slurm with or without cgroups. If running outside Slurm (not covering CUDA_VISIBLE_DEVICES),
-    // assigned_gpu_idx is 0, casted properly below the same way as EGL_DEFAULT_DISPLAY is.
-    if (!slurm_job_gpus.empty() || !slurm_step_gpus.empty()) {
-      auto slurm_gpu = (slurm_step_gpus.empty()) ? slurm_job_gpus : slurm_step_gpus;
-      assigned_gpu_idx = stoi(slurm_gpu);
-    }
-    cout << "Using GPU " << assigned_gpu_idx << "." << endl;
-    CHECK_ERROR_EGL(eglQueryDevicesEXT = (PFNEGLQUERYDEVICESEXTPROC) eglGetProcAddress("eglQueryDevicesEXT"));
-    CHECK_ERROR_EGL(eglQueryDevicesEXT(0, nullptr, &actualDeviceCount));
-    EGLDeviceEXT actualEGLDevices[actualDeviceCount];
-    CHECK_ERROR_EGL(eglQueryDevicesEXT(actualDeviceCount, actualEGLDevices, &actualDeviceCount));
-    CHECK_ERROR_EGL(
-            eglGetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC) eglGetProcAddress("eglGetPlatformDisplayEXT")
-    );
-    CHECK_ERROR_EGL(
-      eglDpy = eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT, actualEGLDevices[assigned_gpu_idx], nullptr)
-    );
-  }
-
-  CHECK_ERROR_EGL(eglInitialize(eglDpy, &major, &minor));
-  // 2. Select an appropriate configuration
-  EGLint numConfigs;
-  EGLConfig eglCfg;
-  CHECK_ERROR_EGL(eglChooseConfig(eglDpy, configAttribs, &eglCfg, 1, &numConfigs));
-  // 3. Create a surface
-  EGLSurface eglSurf;
-  CHECK_ERROR_EGL(eglSurf = eglCreatePbufferSurface(eglDpy, eglCfg, nullptr));
-  // 4. Bind the API
-  CHECK_ERROR_EGL(eglBindAPI(EGL_OPENGL_API));
-  // 5. Create a context and make it current
-  EGLContext eglCtx;
-  CHECK_ERROR_EGL(eglCtx = eglCreateContext(eglDpy, eglCfg, EGL_NO_CONTEXT, nullptr));
-  CHECK_ERROR_EGL(eglMakeCurrent(eglDpy, eglSurf, eglSurf, eglCtx));
-  return eglDpy;
-}
-
-void init_glad(GLADloadproc pointer) {
-  if (!gladLoadGLLoader(pointer)) {
-    std::cerr << "Failed to initialize GLAD." << std::endl;
-    throw std::exception();
-  }
 }
 
 void framebuffer_size_callback(GLFWwindow *, int width, int height) {
