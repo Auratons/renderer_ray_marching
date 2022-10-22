@@ -46,7 +46,7 @@ EGLDisplay  init_egl() {
   auto slurm_job_gpus = get_env("SLURM_JOB_GPUS");  // Batch Slurm mode
 
   // Running outside Slurm, not covering CUDA_VISIBLE_DEVICES
-  if (!slurm_job_gpus.empty() || !slurm_step_gpus.empty()) {
+  if (slurm_job_gpus.empty() && slurm_step_gpus.empty()) {
     CHECK_ERROR_EGL(eglDpy = eglGetDisplay(EGL_DEFAULT_DISPLAY));
   }
   else {  // Running inside Slurm with or without cgroups
@@ -55,7 +55,7 @@ EGLDisplay  init_egl() {
     PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT;
 
     // Running inside Slurm with or without cgroups. If running outside Slurm (not covering CUDA_VISIBLE_DEVICES),
-    // assigned_gpu_idx is 0, casted properly below the same way as EGL_DEFAULT_DISPLAY is.
+    // assigned_gpu_idx is 0, cast properly below the same way as EGL_DEFAULT_DISPLAY is.
     if (!slurm_job_gpus.empty() || !slurm_step_gpus.empty()) {
       auto slurm_gpu = (slurm_step_gpus.empty()) ? slurm_job_gpus : slurm_step_gpus;
       assigned_gpu_idx = stoi(slurm_gpu);

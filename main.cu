@@ -7,6 +7,7 @@
 #include <string>
 
 #include <boost/interprocess/sync/file_lock.hpp>
+#include <boost/archive/text_iarchive.hpp>
 #include <boost/archive/text_oarchive.hpp>
 #include <boost/serialization/vector.hpp>
 #include "CLI/App.hpp"
@@ -49,12 +50,13 @@ void        process_input(GLFWwindow *window);
 
 int main(int argc, char** argv) {
   string pcd_path, matrix_path, output_path;
-  bool headless = false;
+  bool headless = false, precompute = false;
   CLI::App args{"Pointcloud Renderer"};
   auto file = args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
   args.add_option("-m,--matrices", matrix_path, "Path to view matrices json for which to render pointcloud in case of headless rendering.");
   args.add_option("-o,--output_path", output_path, "Path where to store renders in case of headless rendering.");
   args.add_flag("-d,--headless", headless, "Run headlessly without a window");
+  args.add_flag("-p,--precompute-radii", precompute, "Precompute radii even if already precomputed.");
   file->required();
   CLI11_PARSE(args, argc, argv);
 
@@ -68,27 +70,48 @@ int main(int argc, char** argv) {
   auto points = thrust::device_vector<float>(thrust::device_ptr<float>((float*)vertices.data().get()), thrust::device_ptr<float>((float*)vertices.data().get()) + 4 * vertices.size());
   auto query = thrust::device_vector<float>(points.begin(), points.end());
 
-  thrust::device_vector<int> indices;
-  thrust::device_vector<float> radii;
-  kdtree::KDTreeSearchParams params(2);
-  auto tree = kdtree::KDTreeFlann();
-  tree.Build(points);
-  tree.Search(query, params, indices, radii);
-  for (size_t i = 1; i < indices.size(); i+=2) {
-    radii[i / 2] = std::sqrt(radii[i]);  // KD tree returns squared distance
-  }
-  radii.resize(radii.size() / 2);
   cout << "Number of points: " << vertices.size() << endl;
 //  cout << "Min radius: " << *std::min_element(radii.begin(), radii.end()) << endl;
 //  cout << "Max radius: " << *std::max_element(radii.begin(), radii.end()) << endl;
 //  cout << "Avg radius: " << std::accumulate(radii.begin(), radii.end(), 0.0f) / (float)radii.size() << endl;
 
-  vector<float> radii_host(radii.begin(), radii.end());
-  cout << "Number of radii: " << radii_host.size() << endl;
-  std::ofstream ofs(pcd_path + ".kdtree.radii");
-  boost::archive::text_oarchive oa(ofs);
-  oa & radii_host;
-  ofs.close();
+  thrust::device_vector<int> indices;
+  thrust::device_vector<float> radii;
+  vector<float> radii_host;
+  kdtree::KDTreeSearchParams search_params(2);
+  auto tree = kdtree::KDTreeFlann();
+  tree.Build(points);
+
+  auto radii_path = filesystem::path(pcd_path + ".kdtree.radii");
+  if (!exists(radii_path) || precompute) {
+    cout << "Precomputing radii..." << endl;
+    tree.Search(query, search_params, indices, radii);
+    for (size_t i = 1; i < indices.size(); i += 2) {
+      radii[i / 2] = std::sqrt(radii[i]);  // KD tree returns squared distance
+    }
+    radii.resize(radii.size() / 2);
+
+    radii_host.resize(radii.size());
+    thrust::copy(radii.begin(), radii.end(), radii_host.begin());
+    std::ofstream ofs(pcd_path + ".kdtree.radii");
+    boost::archive::text_oarchive oa(ofs);
+    oa & radii_host;
+    ofs.close();
+  }
+  else {
+    cout << "Using precomputed radii..." << endl;
+    std::ifstream ifs(radii_path);
+    boost::archive::text_iarchive ia(ifs);
+    ia & radii_host;
+    ifs.close();
+    radii.resize(radii_host.size());
+    thrust::copy(radii_host.begin(), radii_host.end(), radii.begin());
+    if (radii.size() != vertices.size()) {
+      throw runtime_error(string("The radii file '") + radii_path.string() + string(
+              "' does not contain the same number of points as PLY file '" + pcd_path + "'.")
+      );
+    }
+  }
 
   GLFWwindow* window;
   EGLDisplay display;
