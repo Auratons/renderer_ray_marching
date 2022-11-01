@@ -51,10 +51,12 @@ void        process_input(GLFWwindow *window);
 int main(int argc, char** argv) {
   string pcd_path, matrix_path, output_path;
   bool headless = false, precompute = false, ignore_existing = false;
+  float max_radius{0.1f};
   CLI::App args{"Pointcloud Renderer"};
   auto file = args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
   args.add_option("-m,--matrices", matrix_path, "Path to view matrices json for which to render pointcloud in case of headless rendering.");
   args.add_option("-o,--output_path", output_path, "Path where to store renders in case of headless rendering.");
+  args.add_option("-r,--max_radius", max_radius, "Filter possible outliers in radii file by settings max radius.");
   args.add_flag("-d,--headless", headless, "Run headlessly without a window");
   args.add_flag("-p,--precompute-radii", precompute, "Precompute radii even if already precomputed.");
   args.add_flag("-i,--ignore_existing", ignore_existing, "Ignore existing renders and forcefully rewrite them.");
@@ -112,6 +114,13 @@ int main(int argc, char** argv) {
               "' does not contain the same number of points as PLY file '" + pcd_path + "'.")
       );
     }
+  }
+
+  if (max_radius > 0.0f) {
+    thrust::transform(radii.begin(), radii.end(), radii.begin(), [max_radius] __device__ (float &radius) {
+        return (radius > max_radius) ? max_radius : radius;
+      }
+    );
   }
 
   GLFWwindow* window;
