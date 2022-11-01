@@ -77,17 +77,17 @@ public:
     {
       auto velocity = [] (const glm::vec3 &dir, float speed) { return speed * dir; };
       if (direction == FORWARD)
-        Position += velocity(Front, MovementSpeed) * deltaTime;
+        Position += max(velocity(Front, MovementSpeed) * deltaTime, 0.1f);
       if (direction == BACKWARD)
-        Position -= velocity(Front, MovementSpeed) * deltaTime;
+        Position -= max(velocity(Front, MovementSpeed) * deltaTime, 0.1f);
       if (direction == LEFT)
-        Position -= velocity(Right, MovementSpeed) * deltaTime;
+        Position -= max(velocity(Right, MovementSpeed) * deltaTime, 0.1f);
       if (direction == RIGHT)
-        Position += velocity(Right, MovementSpeed) * deltaTime;
+        Position += max(velocity(Right, MovementSpeed) * deltaTime, 0.1f);
       if (direction == DOWN)
-        Position -= velocity(Up, MovementSpeed) * deltaTime;
+        Position -= max(velocity(Up, MovementSpeed) * deltaTime, 0.1f);
       if (direction == UP)
-        Position += velocity(Up, MovementSpeed) * deltaTime;
+        Position += max(velocity(Up, MovementSpeed) * deltaTime, 0.1f);
     }
 
     // processes input received from a mouse input system. Expects the offset value in both the x and y direction.
