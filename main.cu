@@ -50,13 +50,14 @@ void        process_input(GLFWwindow *window);
 
 int main(int argc, char** argv) {
   string pcd_path, matrix_path, output_path;
-  bool headless = false, precompute = false;
+  bool headless = false, precompute = false, ignore_existing = false;
   CLI::App args{"Pointcloud Renderer"};
   auto file = args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
   args.add_option("-m,--matrices", matrix_path, "Path to view matrices json for which to render pointcloud in case of headless rendering.");
   args.add_option("-o,--output_path", output_path, "Path where to store renders in case of headless rendering.");
   args.add_flag("-d,--headless", headless, "Run headlessly without a window");
   args.add_flag("-p,--precompute-radii", precompute, "Precompute radii even if already precomputed.");
+  args.add_flag("-i,--ignore_existing", ignore_existing, "Ignore existing renders and forcefully rewrite them.");
   file->required();
   CLI11_PARSE(args, argc, argv);
 
@@ -128,17 +129,22 @@ int main(int argc, char** argv) {
           cout << "Matrices loaded." << endl;
           json j;
           matrices >> j;
-          auto process = [&](const string &target_render_path, const json &params) {
+          auto process = [&](
+                  const string &target_render_path,
+                  const json &params,
+                  bool ignore_existing) {
             auto path = filesystem::path(target_render_path);
             auto last_but_one_segment = *(--(--path.end()));
             auto last_segment = *(--path.end());
             auto output_file_path = output / last_but_one_segment / last_segment;
             auto lock_file_path = output / last_but_one_segment / ("." + last_segment.string() + ".lock");
-            if (!exists(output)) std::filesystem::create_directory(output);
+            if (!exists(output)) filesystem::create_directory(output);
             if (!exists(output / last_but_one_segment)) filesystem::create_directory(output / last_but_one_segment);
-            if (filesystem::exists(output_file_path)) {
-              cout << canonical(absolute(output_file_path)) << ": " << "ALREADY EXISTS" << endl;
-              return;
+            if (!ignore_existing) {
+              if (filesystem::exists(output_file_path)) {
+                cout << canonical(absolute(output_file_path)) << ": " << "ALREADY EXISTS" << endl;
+                return;
+              }
             }
             { ofstream{lock_file_path}; }
             boost::interprocess::file_lock lock(lock_file_path.c_str());
@@ -168,12 +174,18 @@ int main(int argc, char** argv) {
             remove(lock_file_path);
           };
           for (auto &[target_render_path, params]: j.at("train").items()) {
-            process(target_render_path, params);
+            process(target_render_path, params, ignore_existing);
           }
           for (auto &[target_render_path, params]: j.at("val").items()) {
-            process(target_render_path, params);
+            process(target_render_path, params, ignore_existing);
           }
         }
+        else {
+          cout << "Error opening matrix file" << endl;
+        }
+      }
+      else {
+        cout << "The matrix file '" << matrix_path << "' was not found." << endl;
       }
     }
     else {
