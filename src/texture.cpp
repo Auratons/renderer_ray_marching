@@ -14,7 +14,7 @@ Texture2D::Texture2D(
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, max_filter);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
   glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, format, type, data);
-  glBindImageTexture(0, id, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+//  glBindImageTexture(0, id, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 }
 
 Texture2D::~Texture2D() {

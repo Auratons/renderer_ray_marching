@@ -38,9 +38,10 @@ GLuint TEXTURE_HANDLE;
 
 PointcloudRayMarcher *PointcloudRayMarcher::instance = nullptr;
 
-surface<void, cudaSurfaceType2D> surfaceWrite; // NOLINT(cert-err58-cpp)
-cudaGraphicsResource_t           cuda_image_resource_handle;
-cudaArray_t                      cuda_image;
+cudaGraphicsResource_t cuda_image_resource_handle;
+cudaArray_t            cuda_image;
+cudaSurfaceObject_t    g_surfaceObj;
+cudaResourceDesc       g_resourceDesc;
 
 
 struct RayHit {
@@ -62,7 +63,7 @@ __device__ __host__ float3 make_float3(const T &v) {
 }
 
 
-__global__ void render()
+__global__ void render(cudaSurfaceObject_t surface)
 {
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -86,10 +87,7 @@ __global__ void render()
   if (color_index >= 0) {
     finalColor = COLORS[color_index];
   }
-#pragma diag_suppress 1215  // Deprecated symbol
-  surf2Dwrite(finalColor, surfaceWrite, x * sizeof(float4), y);
-#pragma diag_default 1215  // Deprecated symbol get back default behavior
-  __syncthreads();
+  surf2Dwrite(finalColor, surface, x * (int)sizeof(float4), y);
 }
 
 void PointcloudRayMarcher::render_to_texture(
@@ -122,10 +120,13 @@ void PointcloudRayMarcher::render_to_texture(
   );
   CHECK_ERROR_CUDA( cudaGraphicsMapResources(1, &cuda_image_resource_handle) );
   CHECK_ERROR_CUDA( cudaGraphicsSubResourceGetMappedArray(&cuda_image, cuda_image_resource_handle, 0, 0) );
-  CHECK_ERROR_CUDA( cudaBindSurfaceToArray(surfaceWrite, cuda_image) );
+  memset(&g_resourceDesc, 0, sizeof(cudaResourceDesc));
+  g_resourceDesc.resType = cudaResourceTypeArray;
+  g_resourceDesc.res.array.array = cuda_image;
+  CHECK_ERROR_CUDA(cudaCreateSurfaceObject(&g_surfaceObj, &g_resourceDesc));
   dim3 block_dim(16, 16, 1);
   dim3 grid_dim((texture.width + block_dim.x - 1) / block_dim.x, (texture.height + block_dim.y - 1) / block_dim.y, 1);
-  render<<< grid_dim, block_dim >>>();
+  render<<< grid_dim, block_dim >>>(g_surfaceObj);
   CHECK_ERROR_CUDA();
   CHECK_ERROR_CUDA( cudaGraphicsUnmapResources(1, &cuda_image_resource_handle) );
   CHECK_ERROR_CUDA( cudaGraphicsUnregisterResource(cuda_image_resource_handle) );
