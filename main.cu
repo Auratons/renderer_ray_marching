@@ -4,6 +4,7 @@
 #include <iostream>
 #include <filesystem>
 #include <map>  // Even thought seems unused it's needed for nlohmann
+#include <regex>
 #include <string>
 
 #include <boost/interprocess/sync/file_lock.hpp>
@@ -146,6 +147,7 @@ int main(int argc, char** argv) {
             auto last_but_one_segment = *(--(--path.end()));
             auto last_segment = *(--path.end());
             auto output_file_path = output / last_but_one_segment / last_segment;
+            auto output_depth_path = output / last_but_one_segment / std::regex_replace(last_segment.string(), std::regex("_color"), "_depth");
             auto lock_file_path = output / last_but_one_segment / ("." + last_segment.string() + ".lock");
             if (!exists(output)) filesystem::create_directory(output);
             if (!exists(output / last_but_one_segment)) filesystem::create_directory(output / last_but_one_segment);
@@ -170,13 +172,17 @@ int main(int argc, char** argv) {
             assert(focal_length_pixels == camera_matrix[1][1]);
             auto fov_radians = 2.0f * atanf(image_width / (2.0f * focal_length_pixels));
 
+            glActiveTexture(GL_TEXTURE0);
             auto texture = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
+            glActiveTexture(GL_TEXTURE1);
+            auto depth = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
+            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, depth, tree);
 
             auto start = high_resolution_clock::now();
             ray_marcher->render_to_texture(camera_pose, fov_radians);
             auto end = high_resolution_clock::now();
             ray_marcher->save_png(output_file_path.c_str());
+            ray_marcher->save_depth(output_depth_path.c_str());
             cout << canonical(absolute(output_file_path)) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
 
             lock.unlock();
@@ -212,8 +218,8 @@ int main(int argc, char** argv) {
 
       FPSCounter fps;
       camera.Zoom = glm::radians(60.0f);
-      auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
+//      auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
+//      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
 
       // render loop
       while (!glfwWindowShouldClose(window)) {
@@ -221,8 +227,8 @@ int main(int argc, char** argv) {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        ray_marcher->render_to_texture(camera.GetViewMatrix(), camera.Zoom);
-        quad.render(ray_marcher->get_texture().get_id());
+//        ray_marcher->render_to_texture(camera.GetViewMatrix(), camera.Zoom);
+//        quad.render(ray_marcher->get_texture().get_id());
 
         fps.update();
         process_input(window);

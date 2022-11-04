@@ -82,6 +82,39 @@ RUN export DIR=/tmp/nlohmann \
  && rm -rf ${DIR} \
  && unset DIR
 
+RUN export DEBIAN_FRONTEND=noninteractive \
+ && apt-get -yqq update \
+ && apt-get install -yqq --no-install-recommends \
+        libpng-dev \
+        libjpeg-dev \
+        libopenexr-dev \
+        libtiff-dev \
+        libwebp-dev \
+        libgtk2.0-dev \
+        libibus-1.0-dev \
+        libdbus-c++-dev \
+        python-gobject-2-dev \
+        libglib2.0-dev \
+        nvidia-cuda-gdb 1> /dev/null \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* \
+ && unset DEBIAN_FRONTEND
+
+# Install OpenCV
+RUN export DIR=/tmp/opencv \
+ && git clone --depth 1 --branch 4.5.1 https://github.com/opencv/opencv.git ${DIR} \
+ && cmake -S "${DIR}" -B "${DIR}/build" \
+        -D CMAKE_BUILD_TYPE=RELEASE \
+        -D OPENCV_ENABLE_NONFREE=ON \
+ && cmake --build "${DIR}/build" --target install --config Debug -j $(nproc) \
+ && rm -rf ${DIR} \
+ && unset DIR
+
+# Workaround for includes
+RUN ln -s /usr/local/include/opencv4/opencv2 /usr/local/include
+# Necessary for the example to work (to be able to find installed library)
+ENV LD_LIBRARY_PATH=/usr/local/lib
+
 ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
 
 COPY ./docker-entrypoint.sh /

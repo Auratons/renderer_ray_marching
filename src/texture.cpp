@@ -7,7 +7,6 @@ Texture2D::Texture2D(
     width(width), height(height), data(data), internal_format(internal_format), format(format), wrap_s(wrap_s),
     wrap_t(wrap_t), min_filter(min_filter), max_filter(max_filter), type(type) {
   glGenTextures(1, &id);
-  glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, id);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t);
