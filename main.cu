@@ -4,6 +4,7 @@
 #include <iostream>
 #include <filesystem>
 #include <map>  // Even thought seems unused it's needed for nlohmann
+#include <regex>
 #include <string>
 
 #include <boost/interprocess/sync/file_lock.hpp>
@@ -14,6 +15,8 @@
 #include "CLI/Formatter.hpp"  // Even thought seems unused it's needed
 #include "CLI/Config.hpp"  // Even thought seems unused it's needed
 #include <cuda_runtime.h>
+#define GLM_FORCE_CUDA
+#define CUDA_VERSION 7000
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <kdtree/kdtree_flann.h>
@@ -50,13 +53,16 @@ void        process_input(GLFWwindow *window);
 
 int main(int argc, char** argv) {
   string pcd_path, matrix_path, output_path;
-  bool headless = false, precompute = false;
+  bool headless = false, precompute = false, ignore_existing = false;
+  float max_radius{0.01f};
   CLI::App args{"Pointcloud Renderer"};
   auto file = args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
   args.add_option("-m,--matrices", matrix_path, "Path to view matrices json for which to render pointcloud in case of headless rendering.");
   args.add_option("-o,--output_path", output_path, "Path where to store renders in case of headless rendering.");
+  args.add_option("-r,--max_radius", max_radius, "Filter possible outliers in radii file by settings max radius.");
   args.add_flag("-d,--headless", headless, "Run headlessly without a window");
   args.add_flag("-p,--precompute-radii", precompute, "Precompute radii even if already precomputed.");
+  args.add_flag("-i,--ignore_existing", ignore_existing, "Ignore existing renders and forcefully rewrite them.");
   file->required();
   CLI11_PARSE(args, argc, argv);
 
@@ -113,6 +119,13 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (max_radius > 0.0f) {
+    thrust::transform(radii.begin(), radii.end(), radii.begin(), [max_radius] __device__ (float &radius) {
+        return (radius > max_radius) ? max_radius : radius;
+      }
+    );
+  }
+
   GLFWwindow* window;
   EGLDisplay display;
 
@@ -128,17 +141,23 @@ int main(int argc, char** argv) {
           cout << "Matrices loaded." << endl;
           json j;
           matrices >> j;
-          auto process = [&](const string &target_render_path, const json &params) {
+          auto process = [&](
+                  const string &target_render_path,
+                  const json &params,
+                  bool ignore_existing) {
             auto path = filesystem::path(target_render_path);
             auto last_but_one_segment = *(--(--path.end()));
             auto last_segment = *(--path.end());
             auto output_file_path = output / last_but_one_segment / last_segment;
+            auto output_depth_path = output / last_but_one_segment / std::regex_replace(last_segment.string(), std::regex("_color"), "_depth");
             auto lock_file_path = output / last_but_one_segment / ("." + last_segment.string() + ".lock");
-            if (!exists(output)) std::filesystem::create_directory(output);
+            if (!exists(output)) filesystem::create_directory(output);
             if (!exists(output / last_but_one_segment)) filesystem::create_directory(output / last_but_one_segment);
-            if (filesystem::exists(output_file_path)) {
-              cout << canonical(absolute(output_file_path)) << ": " << "ALREADY EXISTS" << endl;
-              return;
+            if (!ignore_existing) {
+              if (filesystem::exists(output_file_path)) {
+                cout << canonical(absolute(output_file_path)) << ": " << "ALREADY EXISTS" << endl;
+                return;
+              }
             }
             { ofstream{lock_file_path}; }
             boost::interprocess::file_lock lock(lock_file_path.c_str());
@@ -155,25 +174,33 @@ int main(int argc, char** argv) {
             assert(focal_length_pixels == camera_matrix[1][1]);
             auto fov_radians = 2.0f * atanf(image_width / (2.0f * focal_length_pixels));
 
+            glActiveTexture(GL_TEXTURE0);
             auto texture = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
+            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, tree);
 
             auto start = high_resolution_clock::now();
-            ray_marcher->render_to_texture(camera_pose, fov_radians);
+            ray_marcher->render_to_texture(camera_pose, fov_radians, texture);
             auto end = high_resolution_clock::now();
-            ray_marcher->save_png(output_file_path.c_str());
+            save_png(output_file_path.c_str(), texture);
+            save_depth(output_depth_path.c_str(), texture);
             cout << canonical(absolute(output_file_path)) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
 
             lock.unlock();
             remove(lock_file_path);
           };
           for (auto &[target_render_path, params]: j.at("train").items()) {
-            process(target_render_path, params);
+            process(target_render_path, params, ignore_existing);
           }
           for (auto &[target_render_path, params]: j.at("val").items()) {
-            process(target_render_path, params);
+            process(target_render_path, params, ignore_existing);
           }
         }
+        else {
+          cout << "Error opening matrix file" << endl;
+        }
+      }
+      else {
+        cout << "The matrix file '" << matrix_path << "' was not found." << endl;
       }
     }
     else {
@@ -191,8 +218,8 @@ int main(int argc, char** argv) {
 
       FPSCounter fps;
       camera.Zoom = glm::radians(60.0f);
-      auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
+//      auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
+//      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
 
       // render loop
       while (!glfwWindowShouldClose(window)) {
@@ -200,8 +227,8 @@ int main(int argc, char** argv) {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        ray_marcher->render_to_texture(camera.GetViewMatrix(), camera.Zoom);
-        quad.render(ray_marcher->get_texture().get_id());
+//        ray_marcher->render_to_texture(camera.GetViewMatrix(), camera.Zoom);
+//        quad.render(ray_marcher->get_texture().get_id());
 
         fps.update();
         process_input(window);

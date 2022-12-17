@@ -24,6 +24,7 @@ find_package(OpenGL REQUIRED COMPONENTS OpenGL EGL GLX)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(nlohmann_json 3.10 REQUIRED)
 find_package(Boost REQUIRED system serialization)
+find_package(OpenCV REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for debugging, to generate build/compile_commands.json
 
@@ -36,12 +37,14 @@ add_executable(${PROJECT_NAME}
   src/shader.cpp
   src/texture.cpp
   src/utils.cu
+  src/npy.hpp
   include/stb_image_write.cpp
 )
 
 target_include_directories(${PROJECT_NAME}
   PRIVATE
     ${Boost_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -60,6 +63,7 @@ target_link_libraries(${PROJECT_NAME}
   nlohmann_json::nlohmann_json
   Boost::boost  # Header-only target for interprocess.
   ${Boost_LIBRARIES}
+  ${OpenCV_LIBS}
 #  GLUT::GLUT
 #  X11
 #  Xrandr
@@ -78,6 +82,7 @@ target_compile_options(${PROJECT_NAME}
     $<$<AND:$<COMPILE_LANG_AND_ID:CXX,CUDA,GNU>,$<CONFIG:DEBUG>>:-Wall -Wextra -Wextra -Wunreachable-code -Wunused -Wunused-function -Wunused-label -Wunused-parameter -Wunused-value -Wunused-variable>
     $<$<AND:$<COMPILE_LANG_AND_ID:CXX,CUDA,GNU>,$<CONFIG:RELEASE>>:-O2>
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe --display_error_number,--diag_suppress="611,997,20012" --extended-lambda --relocatable-device-code=true --compile>
+    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:DEBUG>>:-G -g>
 )
 
 set_source_files_properties(include/stb_image_write.cpp

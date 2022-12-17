@@ -17,8 +17,6 @@ private:
     const int knn = 10;
     thrust::device_vector<glm::vec4> frustum_edge_pts_world_cs = thrust::device_vector<glm::vec4>(4);
     thrust::device_vector<size_t> frustum_vertices_idx;
-    size_t frustum_pcd_size = 0;
-    Texture2D texture;
     const kdtree::KDTreeFlann &tree;
     thrust::device_vector<int> indices;
     thrust::device_vector<float> distances;
@@ -29,7 +27,6 @@ protected:
     const thrust::device_vector<glm::vec4> &vertices,
     const thrust::device_vector<glm::vec4> &colors,
     const thrust::device_vector<float> &radii,
-    const Texture2D &texture,
     const kdtree::KDTreeFlann &tree
   );
 
@@ -41,16 +38,9 @@ public:
     const thrust::device_vector<glm::vec4> &vertices,
     const thrust::device_vector<glm::vec4> &colors,
     const thrust::device_vector<float> &radii,
-    const Texture2D &texture,
     const kdtree::KDTreeFlann &tree);
 
-  void render_to_texture(const glm::mat4 &view, float fov_radians);
-
-  [[nodiscard]] const Texture2D& get_texture() const noexcept {
-    return texture;
-  }
-
-  void save_png(const std::string &path);
+  void render_to_texture(glm::mat4 view, float fov_radians, const Texture2D &texture);
 };
 
 #endif //POINTCLOUD_RENDERER_RAY_MARCHING_H
