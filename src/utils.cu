@@ -7,8 +7,11 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <kdtree/kdtree_flann.h>
+#include <opencv2/imgcodecs.hpp>
+#include <stb_image_write.h>
 #include <thrust/device_vector.h>
 
+#include "npy.hpp"
 #include "utils.h"
 
 std::string glu_error_string(GLenum x) {
@@ -143,4 +146,47 @@ void glm::from_json(const nlohmann::json &j, glm::mat4 &P) {
     row0[2], row1[2], row2[2], row3[2],
     row0[3], row1[3], row2[3], row3[3]
   );
+}
+
+void save_png(const std::string &filename, const Texture2D &texture) {
+  glActiveTexture(GL_TEXTURE0);
+  auto raw_data = texture.get_texture_data<float4>();
+  std::transform(raw_data.begin(), raw_data.end(), raw_data.begin(), [](auto &val){ val.w = 1.0; return val; });
+  auto png = std::vector<unsigned char>(4 * texture.width * texture.height);  // 4=RGBA
+  auto begin = (const float*)raw_data.data();
+  auto end = (const float*)(raw_data.data() + raw_data.size());
+  std::transform(begin, end, png.begin(), [](const float &val){ return (unsigned char)(val * 255.0f); });
+  // OpenGL expects the 0.0 coordinate on the y-axis to be on the bottom side of the image, but images usually
+  // have 0.0 at the top of the y-axis. For now, this unifies output with the visualisation on the screen.
+  stbi_flip_vertically_on_write(true);
+  stbi_write_png(filename.c_str(), texture.width, texture.height, 4, png.data(), 4 * texture.width);  // 4=RGBA
+}
+
+void save_depth(const std::string &filename, const Texture2D &texture) {
+  glActiveTexture(GL_TEXTURE0);
+  auto raw_quartets = texture.get_texture_data<float4>();
+  auto raw_data = std::vector<float>(texture.width * texture.height);
+  std::transform(raw_quartets.begin(), raw_quartets.end(), raw_data.begin(), [](const auto &val){ return val.w; });
+  // OpenGL expects the 0.0 coordinate on the y-axis to be on the bottom side of the image, but images usually
+  // have 0.0 at the top of the y-axis. For now, this unifies output with the visualisation on the screen.
+  for (int r = 0; r < (texture.height/2); ++r)
+  {
+    for (int c = 0; c != texture.width; ++c)
+    {
+      std::swap(raw_data[r * texture.width + c], raw_data[(texture.height - 1 - r) * texture.width + c]);
+    }
+  }
+  auto png = std::vector<uint8_t>(texture.width * texture.height);
+  auto begin = (const float*)raw_data.data();
+  auto end = (const float*)(raw_data.data() + raw_data.size());
+  std::transform(begin, end, png.begin(), [](const float &val){
+      if (std::abs(val - 1.0f) < 0.00001f)  // To reflect texture of empty spaces handling in the original article.
+        return (uint8_t)0;
+      return (uint8_t)std::clamp((255.0f / 100.0f) * val, 0.0f, 255.0f); }
+  );
+  const std::vector<long unsigned> shape{(long unsigned)texture.height, (long unsigned)texture.width};
+  const bool fortran_order{false};
+  npy::SaveArrayAsNumpy(filename + ".npy", fortran_order, shape.size(), shape.data(), raw_data);
+  auto img = cv::Mat(texture.height, texture.width, CV_8UC1, png.data());
+  cv::imwrite(filename, img);
 }

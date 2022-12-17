@@ -37,20 +37,7 @@ __device__ int KNN;
 
 __device__ float4 *FRUSTUM_EDGE_PTS_WORLD_CS;
 
-GLuint TEXTURE_HANDLE;
-GLuint DEPTH_HANDLE;
-
 PointcloudRayMarcher *PointcloudRayMarcher::instance = nullptr;
-
-cudaGraphicsResource_t cuda_image_resource_handle;
-cudaArray_t            cuda_image;
-cudaSurfaceObject_t    g_surfaceObj;
-cudaResourceDesc       g_resourceDesc;
-
-cudaGraphicsResource_t depth_cuda_image_resource_handle;
-cudaArray_t            depth_cuda_image;
-cudaSurfaceObject_t    depth_g_surfaceObj;
-cudaResourceDesc       depth_g_resourceDesc;
 
 
 struct RayHit {
@@ -73,7 +60,7 @@ __device__ __host__ float3 make_float3(const T &v) {
 }
 
 
-__global__ void render(cudaSurfaceObject_t surface, cudaSurfaceObject_t dp)
+__global__ void render(cudaSurfaceObject_t surface)
 {
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -97,16 +84,30 @@ __global__ void render(cudaSurfaceObject_t surface, cudaSurfaceObject_t dp)
   auto finalColor = BACKGROUND_COLOR;
   if (color_index >= 0) {
     finalColor = COLORS[color_index];
+    // Temporarily use the alpha layer as the depth layer as registering an image to CUDA is costly operation.
+    finalColor.w = depth;
   }
   surf2Dwrite(finalColor, surface, x * (int)sizeof(float4), y);
-  surf2Dwrite(make_float4(depth), dp, x * (int)sizeof(float4), y);
 }
 
 void PointcloudRayMarcher::render_to_texture(
-  const glm::mat4 &camera_matrix,
-  float fov_radians) {
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(CAMERA_MATRIX, &camera_matrix, sizeof(camera_matrix)) );
+  glm::mat4 camera_matrix,
+  float fov_radians,
+  const Texture2D &texture) {
+  auto pixel_count = texture.width * texture.height;
+  indices.resize(pixel_count * knn);
+  distances.resize(pixel_count * knn);
+  query.resize(pixel_count);
+  auto ptr_i = indices.data().get();
+  auto ptr_v = distances.data().get();
+  auto ptr_f4 = query.data().get();
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FOV_RADIANS, &fov_radians, sizeof(fov_radians)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(CAMERA_MATRIX, &camera_matrix, sizeof(camera_matrix)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(TEXTURE_WIDTH, &texture.width, sizeof(texture.width)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(TEXTURE_HEIGHT, &texture.height, sizeof(texture.height)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(INDICES, &ptr_i, sizeof(ptr_i)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(DISTANCES, &ptr_v, sizeof(ptr_v)) );
+  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(QUERY, &ptr_f4, sizeof(ptr_f4)) );
 
   // Generate homogeneous point for a frustum-edge-lying point
   auto v = [&] (float x, float y){
@@ -122,82 +123,34 @@ void PointcloudRayMarcher::render_to_texture(
   frustum_edge_pts_world_cs[2] = camera_matrix * v(1, 1);
   frustum_edge_pts_world_cs[3] = camera_matrix * v(-1, 1);
 
+  cudaGraphicsResource_t cuda_image_resource_handle;
+  cudaArray_t            cuda_image;
+  cudaSurfaceObject_t    g_surfaceObj;
+  cudaResourceDesc       g_resourceDesc;
+
   CHECK_ERROR_CUDA(
     cudaGraphicsGLRegisterImage(
       &cuda_image_resource_handle,
-      TEXTURE_HANDLE,
+      texture.get_id(),
       GL_TEXTURE_2D,
       cudaGraphicsRegisterFlagsSurfaceLoadStore
     )
   );
   CHECK_ERROR_CUDA( cudaGraphicsMapResources(1, &cuda_image_resource_handle) );
+
   CHECK_ERROR_CUDA( cudaGraphicsSubResourceGetMappedArray(&cuda_image, cuda_image_resource_handle, 0, 0) );
   memset(&g_resourceDesc, 0, sizeof(cudaResourceDesc));
   g_resourceDesc.resType = cudaResourceTypeArray;
   g_resourceDesc.res.array.array = cuda_image;
   CHECK_ERROR_CUDA(cudaCreateSurfaceObject(&g_surfaceObj, &g_resourceDesc));
-  CHECK_ERROR_CUDA(
-    cudaGraphicsGLRegisterImage(
-      &depth_cuda_image_resource_handle,
-      DEPTH_HANDLE,
-      GL_TEXTURE_2D,
-      cudaGraphicsRegisterFlagsSurfaceLoadStore
-    )
-  );
-  CHECK_ERROR_CUDA( cudaGraphicsMapResources(1, &depth_cuda_image_resource_handle) );
-  CHECK_ERROR_CUDA( cudaGraphicsSubResourceGetMappedArray(&depth_cuda_image, depth_cuda_image_resource_handle, 0, 0) );
-  memset(&depth_g_resourceDesc, 0, sizeof(cudaResourceDesc));
-  depth_g_resourceDesc.resType = cudaResourceTypeArray;
-  depth_g_resourceDesc.res.array.array = depth_cuda_image;
-  CHECK_ERROR_CUDA(cudaCreateSurfaceObject(&depth_g_surfaceObj, &depth_g_resourceDesc));
+
   dim3 block_dim(16, 16, 1);
   dim3 grid_dim((texture.width + block_dim.x - 1) / block_dim.x, (texture.height + block_dim.y - 1) / block_dim.y, 1);
-  render<<< grid_dim, block_dim >>>(g_surfaceObj, depth_g_surfaceObj);
+  render<<< grid_dim, block_dim >>>(g_surfaceObj);
+
   CHECK_ERROR_CUDA();
-  CHECK_ERROR_CUDA( cudaGraphicsUnmapResources(1, &depth_cuda_image_resource_handle) );
-  CHECK_ERROR_CUDA( cudaGraphicsUnregisterResource(depth_cuda_image_resource_handle) );
   CHECK_ERROR_CUDA( cudaGraphicsUnmapResources(1, &cuda_image_resource_handle) );
   CHECK_ERROR_CUDA( cudaGraphicsUnregisterResource(cuda_image_resource_handle) );
-}
-
-void PointcloudRayMarcher::save_png(const std::string &filename) {
-  glActiveTexture(GL_TEXTURE0);
-  auto raw_data = texture.get_texture_data<float4>();
-  auto png = std::vector<unsigned char>(4 * texture.width * texture.height);  // 4=RGBA
-  auto begin = (const float*)raw_data.data();
-  auto end = (const float*)(raw_data.data() + raw_data.size());
-  std::transform(begin, end, png.begin(), [](const float &val){ return (unsigned char)(val * 255.0f); });
-  // OpenGL expects the 0.0 coordinate on the y-axis to be on the bottom side of the image, but images usually
-  // have 0.0 at the top of the y-axis. For now, this unifies output with the visualisation on the screen.
-  stbi_flip_vertically_on_write(true);
-  stbi_write_png(filename.c_str(), texture.width, texture.height, 4, png.data(), 4 * texture.width);  // 4=RGBA
-}
-
-void PointcloudRayMarcher::save_depth(const std::string &filename) {
-  glActiveTexture(GL_TEXTURE1);
-  auto raw_quartets = depth.get_texture_data<float4>();
-  auto raw_data = std::vector<float>(depth.width * depth.height);
-  for (size_t i = 0; i < raw_quartets.size(); ++i) {
-    raw_data[i] = raw_quartets[i].x;
-  }
-  // OpenGL expects the 0.0 coordinate on the y-axis to be on the bottom side of the image, but images usually
-  // have 0.0 at the top of the y-axis. For now, this unifies output with the visualisation on the screen.
-  for (int r = 0; r < (depth.height/2); ++r)
-  {
-    for (int c = 0; c != depth.width; ++c)
-    {
-      std::swap(raw_data[r * depth.width + c], raw_data[(depth.height - 1 - r) * depth.width + c]);
-    }
-  }
-  auto png = std::vector<uint16_t>(depth.width * depth.height);
-  auto begin = (const float*)raw_data.data();
-  auto end = (const float*)(raw_data.data() + raw_data.size());
-  std::transform(begin, end, png.begin(), [](const float &val){ return (uint16_t)val; });
-  const std::vector<long unsigned> shape{(long unsigned)depth.height, (long unsigned)depth.width};
-  const bool fortran_order{false};
-  npy::SaveArrayAsNumpy(filename + ".npy", fortran_order, shape.size(), shape.data(), raw_data);
-  auto img = cv::Mat(depth.height, depth.width, CV_16UC1, png.data());
-  cv::imwrite(filename, img);
 }
 
 /*
@@ -207,13 +160,9 @@ PointcloudRayMarcher *PointcloudRayMarcher::get_instance(
   const thrust::device_vector<glm::vec4> &vertices,
   const thrust::device_vector<glm::vec4> &colors,
   const thrust::device_vector<float> &radii,
-  const Texture2D &texture,
-  const Texture2D &depth,
   const kdtree::KDTreeFlann &tree) {
-  TEXTURE_HANDLE = texture.get_id();
-  DEPTH_HANDLE = depth.get_id();
   if(instance == nullptr) {
-    instance = new PointcloudRayMarcher(vertices, colors, radii, texture, depth, tree);
+    instance = new PointcloudRayMarcher(vertices, colors, radii, tree);
   }
   return instance;
 }
@@ -222,9 +171,7 @@ PointcloudRayMarcher::PointcloudRayMarcher(
   const thrust::device_vector<glm::vec4> &vertices,
   const thrust::device_vector<glm::vec4> &colors,
   const thrust::device_vector<float> &radii,
-  const Texture2D &texture,
-  const Texture2D &depth,
-  const kdtree::KDTreeFlann &tree) : vertices(vertices), colors(colors), radii(radii), texture(texture), depth(depth), tree(tree) {
+  const kdtree::KDTreeFlann &tree) : vertices(vertices), colors(colors), radii(radii), tree(tree) {
   auto ptr = reinterpret_cast<const float4 *>(vertices.data().get());
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(VERTICES, &ptr, sizeof(ptr)) );
   ptr = reinterpret_cast<const float4 *>(colors.data().get());
@@ -235,8 +182,6 @@ PointcloudRayMarcher::PointcloudRayMarcher(
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(POINTCLOUD_SIZE, &pointcloud_size, sizeof(pointcloud_size)) );
   auto ptr_f4 = reinterpret_cast<float4 *>(frustum_edge_pts_world_cs.data().get());
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(FRUSTUM_EDGE_PTS_WORLD_CS, &ptr_f4, sizeof(ptr_f4)) );
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(TEXTURE_WIDTH, &texture.width, sizeof(texture.width)) );
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(TEXTURE_HEIGHT, &texture.height, sizeof(texture.height)) );
   auto gpu_splits = thrust::raw_pointer_cast(&((*tree.flann_index_->gpu_helper_->gpu_splits_)[0]));
   auto gpu_child1 = thrust::raw_pointer_cast(&((*tree.flann_index_->gpu_helper_->gpu_child1_)[0]));
   auto gpu_parent = thrust::raw_pointer_cast(&((*tree.flann_index_->gpu_helper_->gpu_parent_)[0]));
@@ -251,16 +196,6 @@ PointcloudRayMarcher::PointcloudRayMarcher(
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(GPU_AABB_MAX, &gpu_aabb_max, sizeof(gpu_aabb_max)) );
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(GPU_POINTS, &gpu_points, sizeof(gpu_points)) );
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(GPU_VIND, &gpu_vind, sizeof(gpu_vind)) );
-  auto pixel_count = texture.width * texture.height;
-  indices.resize(pixel_count * knn);
-  distances.resize(pixel_count * knn);
-  query.resize(pixel_count);
-  auto ptr_i = indices.data().get();
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(INDICES, &ptr_i, sizeof(ptr_i)) );
-  auto ptr_v = distances.data().get();
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(DISTANCES, &ptr_v, sizeof(ptr_v)) );
-  ptr_f4 = query.data().get();
-  CHECK_ERROR_CUDA( cudaMemcpyToSymbol(QUERY, &ptr_f4, sizeof(ptr_f4)) );
   CHECK_ERROR_CUDA( cudaMemcpyToSymbol(KNN, &knn, sizeof(knn)) );
 }
 

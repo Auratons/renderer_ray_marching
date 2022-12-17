@@ -1,12 +1,15 @@
 #ifndef POINTCLOUD_RENDERER_UTILS_H
 #define POINTCLOUD_RENDERER_UTILS_H
 
+#include <string>
 #include <vector>
 
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 #include <thrust/device_vector.h>
+
+#include "texture.h"
 
 namespace glm {
   std::ostream &operator<<(std::ostream &out, const glm::vec3 &v);
@@ -62,5 +65,8 @@ private:
 public:
   void update();
 };
+
+void save_png(const std::string &filename, const Texture2D &texture);
+void save_depth(const std::string &filename, const Texture2D &texture);
 
 #endif //POINTCLOUD_RENDERER_UTILS_H

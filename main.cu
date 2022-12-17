@@ -15,6 +15,8 @@
 #include "CLI/Formatter.hpp"  // Even thought seems unused it's needed
 #include "CLI/Config.hpp"  // Even thought seems unused it's needed
 #include <cuda_runtime.h>
+#define GLM_FORCE_CUDA
+#define CUDA_VERSION 7000
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <kdtree/kdtree_flann.h>
@@ -52,7 +54,7 @@ void        process_input(GLFWwindow *window);
 int main(int argc, char** argv) {
   string pcd_path, matrix_path, output_path;
   bool headless = false, precompute = false, ignore_existing = false;
-  float max_radius{0.1f};
+  float max_radius{0.01f};
   CLI::App args{"Pointcloud Renderer"};
   auto file = args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
   args.add_option("-m,--matrices", matrix_path, "Path to view matrices json for which to render pointcloud in case of headless rendering.");
@@ -174,15 +176,13 @@ int main(int argc, char** argv) {
 
             glActiveTexture(GL_TEXTURE0);
             auto texture = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-            glActiveTexture(GL_TEXTURE1);
-            auto depth = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, depth, tree);
+            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, tree);
 
             auto start = high_resolution_clock::now();
-            ray_marcher->render_to_texture(camera_pose, fov_radians);
+            ray_marcher->render_to_texture(camera_pose, fov_radians, texture);
             auto end = high_resolution_clock::now();
-            ray_marcher->save_png(output_file_path.c_str());
-            ray_marcher->save_depth(output_depth_path.c_str());
+            save_png(output_file_path.c_str(), texture);
+            save_depth(output_depth_path.c_str(), texture);
             cout << canonical(absolute(output_file_path)) << ": " << (float)duration_cast<milliseconds>(end - start).count() / 1000.0f << " s" << endl;
 
             lock.unlock();
