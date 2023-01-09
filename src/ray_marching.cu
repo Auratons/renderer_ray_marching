@@ -206,7 +206,9 @@ __device__ long int ray_march(
     float dist_to_near_plane,
     int linearized_index,
     float& d) {
-  float total_distance_travelled = 0.0f;
+  // This resolves rendering from the origin (moving initial current_position
+  // away from it) and speeds things up, one if from the loop here was removed.
+  float total_distance_travelled = dist_to_near_plane;
   float3 current_position;
   RayHit res;
 
@@ -215,8 +217,6 @@ __device__ long int ray_march(
     res = distance_function(current_position, linearized_index);
     total_distance_travelled += res.distance;
     if (res.distance < MIN_DIST) {
-      if (total_distance_travelled < dist_to_near_plane)
-        continue;
       d = total_distance_travelled;
       return (long int)res.index;
     }

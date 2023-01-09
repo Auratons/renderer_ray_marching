@@ -1,9 +1,11 @@
+#include <algorithm>
 #include <cstdlib>
 #include <chrono>
 #include <exception>
 #include <iostream>
 #include <filesystem>
 #include <map>  // Even thought seems unused it's needed for nlohmann
+#include <random>
 #include <regex>
 #include <string>
 
@@ -54,22 +56,35 @@ void        process_input(GLFWwindow *window);
 int main(int argc, char** argv) {
   string pcd_path, matrix_path, output_path;
   bool headless = false, precompute = false, ignore_existing = false;
-  float max_radius{0.01f};
+  int mp = -1;
+  float max_radius{0.1f};
   CLI::App args{"Pointcloud Renderer"};
   auto file = args.add_option("-f,--file", pcd_path, "Path to pointcloud to render");
   args.add_option("-m,--matrices", matrix_path, "Path to view matrices json for which to render pointcloud in case of headless rendering.");
   args.add_option("-o,--output_path", output_path, "Path where to store renders in case of headless rendering.");
+  args.add_option("-s,--max_points", mp, "Take exact number of points.");
   args.add_option("-r,--max_radius", max_radius, "Filter possible outliers in radii file by settings max radius.");
   args.add_flag("-d,--headless", headless, "Run headlessly without a window");
   args.add_flag("-p,--precompute-radii", precompute, "Precompute radii even if already precomputed.");
   args.add_flag("-i,--ignore_existing", ignore_existing, "Ignore existing renders and forcefully rewrite them.");
-  file->required();
   CLI11_PARSE(args, argc, argv);
 
   auto output = filesystem::path(output_path);
   auto [vertices_host, colors_host] = Pointcloud::load_ply(pcd_path);
-//  vertices_host.resize(10000);
-//  colors_host.resize(10000);
+
+  std::vector<int> max_points_indices(vertices_host.size());
+  if (mp > 0 && mp < vertices_host.size()) {
+    std::vector<glm::vec4> v_h(mp), c_h(mp);
+    std::iota (std::begin(max_points_indices), std::end(max_points_indices), 0);
+    std::mt19937 g(42); // NOLINT(cert-msc51-cpp)
+    std::shuffle(max_points_indices.begin(), max_points_indices.end(), g);
+    for (int ax = 0; ax < mp; ++ax) {
+      v_h[ax] = vertices_host[max_points_indices[ax]];
+      c_h[ax] = colors_host[max_points_indices[ax]];
+    }
+    vertices_host = v_h;
+    colors_host = c_h;
+  }
   auto vertices = thrust::device_vector<glm::vec4>(vertices_host.begin(), vertices_host.end());
   auto colors = thrust::device_vector<glm::vec4>(colors_host.begin(), colors_host.end());
 
@@ -110,6 +125,13 @@ int main(int argc, char** argv) {
     boost::archive::text_iarchive ia(ifs);
     ia & radii_host;
     ifs.close();
+    if (mp == vertices_host.size()) {
+      vector<float> r_h(mp);
+      for (int ax = 0; ax < mp; ++ax) {
+        r_h[ax] = radii_host[max_points_indices[ax]];
+      }
+      radii_host = r_h;
+    }
     radii.resize(radii_host.size());
     thrust::copy(radii_host.begin(), radii_host.end(), radii.begin());
     if (radii.size() != vertices.size()) {
@@ -128,6 +150,8 @@ int main(int argc, char** argv) {
 
   GLFWwindow* window;
   EGLDisplay display;
+
+  auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, tree);
 
   auto successful_run = true;
   try {
@@ -166,8 +190,15 @@ int main(int argc, char** argv) {
               return;
             }
             cout << absolute(output_file_path) << ": " << "LOCKING" << endl;
-            auto camera_pose = params.at("extrinsic_matrix").get<glm::mat4>();
-            auto camera_matrix = params.at("intrinsic_matrix").get<glm::mat4>();
+            auto camera_pose = params.at("camera_pose").get<glm::mat4>();
+            auto camera_matrix = params.at("calibration_mat").get<glm::mat4>();
+            auto ply_path_for_view = params.value("source_scan_ply_path", pcd_path);
+            ply_path_for_view = canonical(absolute(filesystem::path(ply_path_for_view)));
+            auto loaded_ply_path = canonical(absolute(filesystem::path(pcd_path)));
+            if (ply_path_for_view != loaded_ply_path) {
+              cout << "Skipping " << loaded_ply_path << ", rerun with proper ply." << endl;
+              return;
+            }
             auto image_width = 2.0f * camera_matrix[2][0];
             auto image_height = 2.0f * camera_matrix[2][1];
             auto focal_length_pixels = camera_matrix[0][0];
@@ -176,8 +207,6 @@ int main(int argc, char** argv) {
 
             glActiveTexture(GL_TEXTURE0);
             auto texture = Texture2D((GLsizei)image_width, (GLsizei)image_height, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-            auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, tree);
-
             auto start = high_resolution_clock::now();
             ray_marcher->render_to_texture(camera_pose, fov_radians, texture);
             auto end = high_resolution_clock::now();
@@ -218,8 +247,7 @@ int main(int argc, char** argv) {
 
       FPSCounter fps;
       camera.Zoom = glm::radians(60.0f);
-//      auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
-//      auto ray_marcher = PointcloudRayMarcher::get_instance(vertices, colors, radii, texture, tree);
+      auto texture = Texture2D(SCREEN_WIDTH, SCREEN_HEIGHT, nullptr, GL_RGBA32F, GL_RGBA, GL_CLAMP_TO_EDGE, GL_NEAREST);
 
       // render loop
       while (!glfwWindowShouldClose(window)) {
@@ -227,8 +255,8 @@ int main(int argc, char** argv) {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-//        ray_marcher->render_to_texture(camera.GetViewMatrix(), camera.Zoom);
-//        quad.render(ray_marcher->get_texture().get_id());
+        ray_marcher->render_to_texture(glm::inverse(camera.GetViewMatrix()), camera.Zoom, texture);
+        quad.render(texture.get_id());
 
         fps.update();
         process_input(window);
