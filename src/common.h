@@ -5,7 +5,10 @@
 #define ZNEAR 0.1f
 #define MAX_STEPS 128
 #define MIN_DIST 0.001f
-#define BACKGROUND_COLOR make_float4(0,0,0,1)
+// The missed pixels get depth 0, when reprojected
+// to 3d, there's gonna be a set of points at origin,
+// for InLoc, these should be exchanged for NaNs.
+#define BACKGROUND_COLOR make_float4(0,0,0,0)
 
 #define SCREEN_WIDTH 1024.0
 #define SCREEN_HEIGHT 768.0
